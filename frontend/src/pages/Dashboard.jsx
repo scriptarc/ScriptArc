@@ -7,23 +7,21 @@ import { Progress } from '@/components/ui/progress';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { 
-  Star, 
-  Flame, 
   Trophy, 
   ArrowRight, 
   BookOpen,
   Award,
   TrendingUp,
   Clock,
-  Loader2
+  Loader2,
+  Star
 } from 'lucide-react';
 
 const BADGE_INFO = {
   'first_try_master': { name: 'First Try Master', icon: '⚡', color: 'text-cyan' },
   'no_hint_hero': { name: 'No Hint Hero', icon: '🧠', color: 'text-accent' },
-  '7_day_streak': { name: '7 Day Streak', icon: '🔥', color: 'text-warning' },
-  'star_collector_100': { name: 'Star Collector', icon: '⭐', color: 'text-warning' },
-  'star_collector_500': { name: 'Star Master', icon: '🌟', color: 'text-primary' },
+  'challenge_champion': { name: 'Challenge Champion', icon: '🏆', color: 'text-warning' },
+  'quick_learner': { name: 'Quick Learner', icon: '🚀', color: 'text-primary' },
 };
 
 const Dashboard = () => {
@@ -76,7 +74,7 @@ const Dashboard = () => {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
           {/* Level Card */}
           <Card className="card-glass" data-testid="level-card">
             <CardContent className="pt-6">
@@ -89,39 +87,23 @@ const Dashboard = () => {
               </div>
               <Progress value={levelProgress} className="h-1.5 bg-surface-highlight" />
               <p className="text-xs text-text-secondary mt-2">
-                {50 - ((user?.total_stars || 0) % 50)} stars to next level
+                Complete challenges to level up
               </p>
             </CardContent>
           </Card>
 
-          {/* Stars Card */}
-          <Card className="card-glass" data-testid="stars-card">
+          {/* Challenges Completed Card */}
+          <Card className="card-glass" data-testid="challenges-card">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-text-secondary text-sm">Total Stars</span>
-                <Star className="w-4 h-4 star-gold" />
+                <span className="text-text-secondary text-sm">Challenges</span>
+                <Award className="w-4 h-4 text-accent" />
               </div>
-              <div className="text-3xl font-outfit font-bold text-warning">
-                {user?.total_stars || 0}
-              </div>
-              <p className="text-xs text-text-secondary mt-2">
-                Keep earning more stars!
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Streak Card */}
-          <Card className="card-glass" data-testid="streak-card">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-text-secondary text-sm">Streak</span>
-                <Flame className="w-4 h-4 streak-fire" />
-              </div>
-              <div className="text-3xl font-outfit font-bold text-warning">
-                {dashboardData?.streak_days || 0}
+              <div className="text-3xl font-outfit font-bold text-accent">
+                {dashboardData?.recent_completions?.length || 0}
               </div>
               <p className="text-xs text-text-secondary mt-2">
-                {dashboardData?.streak_days >= 7 ? 'Amazing streak!' : 'days in a row'}
+                Completed challenges
               </p>
             </CardContent>
           </Card>

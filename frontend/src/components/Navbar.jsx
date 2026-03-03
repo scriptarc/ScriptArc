@@ -17,9 +17,7 @@ import {
   BookOpen,
   Trophy,
   Menu,
-  X,
-  Star,
-  Flame
+  X
 } from 'lucide-react';
 
 const Navbar = () => {
@@ -80,18 +78,6 @@ const Navbar = () => {
           <div className="flex items-center gap-4">
             {user ? (
               <>
-                {/* Stats */}
-                <div className="hidden sm:flex items-center gap-4 mr-2">
-                  <div className="flex items-center gap-1 text-warning" data-testid="streak-display">
-                    <Flame className="w-4 h-4 streak-fire" />
-                    <span className="text-sm font-medium">{user.streak_days || 0}</span>
-                  </div>
-                  <div className="flex items-center gap-1 text-warning" data-testid="stars-display">
-                    <Star className="w-4 h-4 star-gold" />
-                    <span className="text-sm font-medium">{user.total_stars || 0}</span>
-                  </div>
-                </div>
-
                 {/* User Menu */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
