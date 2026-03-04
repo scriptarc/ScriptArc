@@ -430,15 +430,13 @@ const Learn = () => {
     : 0;
 
   const getVideoUrl = () => {
-    if (lesson.video_url) return lesson.video_url;
-    // Fallback to Supabase storage bucket
+    // Always use Supabase Storage — DO NOT use lesson.video_url from DB
+    // (DB may have stale/test URLs stored)
     const bucketUrl = process.env.REACT_APP_SUPABASE_URL + '/storage/v1/object/public/videos';
     const filePath = `Course/Data Science/lecture${lesson.order_index}.mp4`;
-    // If we're on localhost, we can use the local public folder
     if (window.location.hostname === 'localhost') {
       return `/${filePath}`;
     }
-    // Otherwise, use the Supabase Storage URL (encoded)
     return `${bucketUrl}/${encodeURI(filePath)}`;
   };
 
@@ -601,7 +599,7 @@ const Learn = () => {
                           {done && (
                             <span className="text-xs text-primary flex items-center gap-0.5">
                               <Target className="w-3 h-3" />
-                              +{(ch.star_value || 1)} pts
+                              +2 pts
                             </span>
                           )}
                         </div>
