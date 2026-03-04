@@ -244,7 +244,7 @@ const CourseSingle = () => {
                           {starsEarned > 0 && (
                             <span className="text-xs text-primary flex items-center gap-0.5">
                               <Code2 className="w-3 h-3" />
-                              {starsEarned * 5} pts
+                              {starsEarned} pts
                             </span>
                           )}
                           {locked && (
@@ -275,7 +275,7 @@ const CourseSingle = () => {
             {/* Progress Card */}
             <Card className="card-glass sticky top-24" data-testid="enrollment-card">
               <CardContent className="p-6">
-                {completedChallengesCount > 0 ? (
+                {Object.keys(progress).length > 0 ? (
                   <>
                     <div className="mb-5">
                       <div className="flex items-center justify-between mb-1.5">

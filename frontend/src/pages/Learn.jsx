@@ -332,11 +332,11 @@ const Learn = () => {
             challenge_id: activeChallenge.id,
             attempts: newAttempts,
             hint_used: newAttempts > 2,
-            stars_awarded: 1,
+            stars_awarded: 2,
           });
         }
       } catch { /* non-critical */ }
-      await onChallengeComplete(1);
+      await onChallengeComplete(2);
     } else {
       setMcqResult('wrong');
       setSelectedOption(null);
@@ -431,7 +431,7 @@ const Learn = () => {
 
   const getVideoUrl = () => {
     if (lesson.video_url) return lesson.video_url;
-    // Fallback to local public folder or Supabase storage bucket
+    // Fallback to Supabase storage bucket
     const bucketUrl = process.env.REACT_APP_SUPABASE_URL + '/storage/v1/object/public/videos';
     const filePath = `Course/Data Science/lecture${lesson.order_index}.mp4`;
     // If we're on localhost, we can use the local public folder
