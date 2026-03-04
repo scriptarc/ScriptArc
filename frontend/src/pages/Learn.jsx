@@ -439,7 +439,7 @@ const Learn = () => {
       return `/${filePath}`;
     }
     // Otherwise, use the Supabase Storage URL (encoded)
-    return `${bucketUrl}/${encodeURIComponent(filePath)}`;
+    return `${bucketUrl}/${encodeURI(filePath)}`;
   };
 
   return (
