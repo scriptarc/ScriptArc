@@ -628,7 +628,7 @@ const Landing = () => {
             <span className="text-foreground">Script<span className="text-primary">Arc</span></span>
           </div>
           <p className="text-muted-foreground text-sm">
-            © 2025 ScriptArc. Learn. Solve. Succeed.
+            © 2026 ScriptArc. Learn. Solve. Succeed.
           </p>
         </div>
       </footer>

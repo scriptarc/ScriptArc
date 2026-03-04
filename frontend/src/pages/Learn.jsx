@@ -134,7 +134,7 @@ const Learn = () => {
       if (user) {
         const { data: prog } = await supabase
           .from('user_progress').select('*')
-          .eq('user_id', user.id).eq('lesson_id', lessonId).single();
+          .eq('user_id', user.id).eq('lesson_id', lessonId).maybeSingle();
         if (prog) {
           setCompletedChallenges(new Set(prog.completed_challenge_ids || []));
           setSessionPoints(prog.stars_earned || 0);
