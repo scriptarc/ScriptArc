@@ -25,7 +25,7 @@ const Leaderboard = () => {
     try {
       const { data, error } = await supabase
         .from('leaderboard')
-        .select('*')
+        .select('id, name, total_stars, avatar_id, rank')
         .limit(50);
 
       if (!error && data) {
@@ -90,25 +90,25 @@ const Leaderboard = () => {
 
         {/* Top 3 Podium */}
         {leaderboard.length >= 3 && (
-          <div className="grid grid-cols-3 gap-4 mb-10">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-10">
             {/* 2nd Place */}
-            <div className="pt-8">
+            <div className="pt-6 sm:pt-8">
               <Card className="card-glass border border-muted-foreground/30 text-center">
-                <CardContent className="pt-6 pb-5">
-                  <div className="relative inline-block mb-3">
-                    <Avatar className="w-16 h-16 border-2 border-muted-foreground/50">
-                      <AvatarFallback className="bg-muted text-foreground text-xl">
+                <CardContent className="pt-4 sm:pt-6 pb-4 sm:pb-5 px-2 sm:px-6">
+                  <div className="relative inline-block mb-2 sm:mb-3">
+                    <Avatar className="w-10 h-10 sm:w-16 sm:h-16 border-2 border-muted-foreground/50">
+                      <AvatarFallback className="bg-muted text-foreground text-base sm:text-xl">
                         {leaderboard[1]?.name?.charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-muted-foreground rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+                    <div className="absolute -bottom-1 -right-1 w-5 h-5 sm:w-6 sm:h-6 bg-muted-foreground rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md">
                       2
                     </div>
                   </div>
-                  <h3 className="font-medium text-foreground truncate">{leaderboard[1]?.name}</h3>
-                  <div className="flex items-center justify-center gap-1.5 text-warning mt-1">
-                    <Star className="w-4 h-4 fill-warning/20" />
-                    <span className="font-mono font-bold">{leaderboard[1]?.total_stars}</span>
+                  <h3 className="font-medium text-foreground truncate text-xs sm:text-sm">{leaderboard[1]?.name}</h3>
+                  <div className="flex items-center justify-center gap-1 text-warning mt-1">
+                    <Star className="w-3 h-3 sm:w-4 sm:h-4 fill-warning/20" />
+                    <span className="font-mono font-bold text-xs sm:text-base">{leaderboard[1]?.total_stars}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -118,45 +118,45 @@ const Leaderboard = () => {
             <div>
               <Card className="card-glass border-warning/30 text-center relative overflow-hidden shadow-glow-primary-sm">
                 <div className="absolute inset-0 bg-warning/5" />
-                <CardContent className="pt-8 pb-6 relative z-10">
-                  <Crown className="w-8 h-8 text-warning mx-auto mb-3 drop-shadow-md" />
-                  <div className="relative inline-block mb-4">
-                    <Avatar className="w-20 h-20 border-[3px] border-warning">
-                      <AvatarFallback className="bg-warning text-white text-2xl font-bold">
+                <CardContent className="pt-5 sm:pt-8 pb-4 sm:pb-6 px-2 sm:px-6 relative z-10">
+                  <Crown className="w-5 h-5 sm:w-8 sm:h-8 text-warning mx-auto mb-2 sm:mb-3 drop-shadow-md" />
+                  <div className="relative inline-block mb-2 sm:mb-4">
+                    <Avatar className="w-12 h-12 sm:w-20 sm:h-20 border-2 sm:border-[3px] border-warning">
+                      <AvatarFallback className="bg-warning text-white text-lg sm:text-2xl font-bold">
                         {leaderboard[0]?.name?.charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
-                    <div className="absolute -bottom-2 -right-1 w-8 h-8 bg-warning rounded-full flex items-center justify-center text-white font-bold shadow-lg shadow-warning/30">
+                    <div className="absolute -bottom-1 sm:-bottom-2 -right-1 w-6 h-6 sm:w-8 sm:h-8 bg-warning rounded-full flex items-center justify-center text-white font-bold text-xs sm:text-sm shadow-lg shadow-warning/30">
                       1
                     </div>
                   </div>
-                  <h3 className="font-bold text-foreground text-lg truncate mb-1">{leaderboard[0]?.name}</h3>
-                  <div className="flex items-center justify-center gap-1.5 text-warning">
-                    <Star className="w-5 h-5 fill-warning/20" />
-                    <span className="font-mono text-xl font-bold">{leaderboard[0]?.total_stars}</span>
+                  <h3 className="font-bold text-foreground text-sm sm:text-lg truncate mb-1">{leaderboard[0]?.name}</h3>
+                  <div className="flex items-center justify-center gap-1 text-warning">
+                    <Star className="w-3 h-3 sm:w-5 sm:h-5 fill-warning/20" />
+                    <span className="font-mono text-base sm:text-xl font-bold">{leaderboard[0]?.total_stars}</span>
                   </div>
                 </CardContent>
               </Card>
             </div>
 
             {/* 3rd Place */}
-            <div className="pt-12">
+            <div className="pt-10 sm:pt-12">
               <Card className="card-glass border-amber-600/30 text-center">
-                <CardContent className="pt-6 pb-4">
-                  <div className="relative inline-block mb-3">
-                    <Avatar className="w-14 h-14 border-2 border-amber-600/50">
-                      <AvatarFallback className="bg-amber-600 text-white text-lg">
+                <CardContent className="pt-4 sm:pt-6 pb-3 sm:pb-4 px-2 sm:px-6">
+                  <div className="relative inline-block mb-2 sm:mb-3">
+                    <Avatar className="w-9 h-9 sm:w-14 sm:h-14 border-2 border-amber-600/50">
+                      <AvatarFallback className="bg-amber-600 text-white text-sm sm:text-lg">
                         {leaderboard[2]?.name?.charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-amber-600 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md">
+                    <div className="absolute -bottom-1 -right-1 w-4 h-4 sm:w-6 sm:h-6 bg-amber-600 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-md">
                       3
                     </div>
                   </div>
-                  <h3 className="font-medium text-foreground truncate text-sm">{leaderboard[2]?.name}</h3>
-                  <div className="flex items-center justify-center gap-1.5 text-warning mt-1">
-                    <Star className="w-4 h-4 fill-warning/20" />
-                    <span className="font-mono font-bold text-sm">{leaderboard[2]?.total_stars}</span>
+                  <h3 className="font-medium text-foreground truncate text-xs sm:text-sm">{leaderboard[2]?.name}</h3>
+                  <div className="flex items-center justify-center gap-1 text-warning mt-1">
+                    <Star className="w-3 h-3 sm:w-4 sm:h-4 fill-warning/20" />
+                    <span className="font-mono font-bold text-xs sm:text-sm">{leaderboard[2]?.total_stars}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -175,36 +175,36 @@ const Leaderboard = () => {
                 {leaderboard.map((player) => (
                   <div
                     key={player.id}
-                    className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${getRankStyle(player.rank)} ${player.id === user?.id ? 'ring-2 ring-primary bg-primary/5' : ''
+                    className={`flex items-center gap-2 sm:gap-4 p-3 sm:p-4 rounded-xl border transition-colors ${getRankStyle(player.rank)} ${player.id === user?.id ? 'ring-2 ring-primary bg-primary/5' : ''
                       }`}
                     data-testid={`leaderboard-row-${player.rank}`}
                   >
                     {/* Rank */}
-                    <div className="w-12 flex justify-center">
+                    <div className="w-8 sm:w-12 flex justify-center shrink-0">
                       {getRankIcon(player.rank)}
                     </div>
 
                     {/* Avatar & Name */}
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                      <Avatar className="w-10 h-10 border border-border/50 shadow-sm">
-                        <AvatarFallback className="bg-primary/20 text-primary font-medium">
+                    <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+                      <Avatar className="w-8 h-8 sm:w-10 sm:h-10 border border-border/50 shadow-sm shrink-0">
+                        <AvatarFallback className="bg-primary/20 text-primary font-medium text-sm">
                           {player.name?.charAt(0).toUpperCase()}
                         </AvatarFallback>
                       </Avatar>
-                      <div className="min-w-0 flex items-center gap-3">
-                        <span className="font-medium text-foreground truncate">
+                      <div className="min-w-0 flex items-center gap-2">
+                        <span className="font-medium text-foreground truncate text-sm sm:text-base">
                           {player.name}
                         </span>
                         {player.id === user?.id && (
-                          <Badge className="bg-primary/20 text-primary hover:bg-primary/30 text-xs border-0">You</Badge>
+                          <Badge className="bg-primary/20 text-primary hover:bg-primary/30 text-xs border-0 shrink-0">You</Badge>
                         )}
                       </div>
                     </div>
 
                     {/* Stats */}
-                    <div className="flex items-center gap-4 text-warning">
-                      <Star className="w-4 h-4 fill-warning/20" />
-                      <span className="font-mono font-bold">{player.total_stars || 0}</span>
+                    <div className="flex items-center gap-1.5 sm:gap-4 text-warning shrink-0">
+                      <Star className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-warning/20" />
+                      <span className="font-mono font-bold text-sm sm:text-base">{player.total_stars || 0}</span>
                     </div>
                   </div>
                 ))}

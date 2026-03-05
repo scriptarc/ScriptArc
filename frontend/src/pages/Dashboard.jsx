@@ -199,7 +199,8 @@ const Dashboard = () => {
                         <img
                           src={course.thumbnail_url || 'https://images.unsplash.com/photo-1526379095098-d400fd0bf935?w=100'}
                           alt={course.title}
-                          className="w-16 h-16 rounded-lg object-cover"
+                          className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg object-cover shrink-0"
+                          loading="lazy"
                         />
                         <div className="flex-1 min-w-0">
                           <h4 className="text-foreground font-medium truncate">{course.title}</h4>

@@ -379,17 +379,21 @@ VALUES (
   '00000000-0000-0000-0000-000000000001',
   '00000000-0000-0000-0000-000000000015',
   'coding',
-  'Reshape a 1D Array to 2D',
-  'Write a NumPy program to:
-1. Create a 1D array containing numbers from 10 to 19
-2. Reshape it into a 2D array with 2 rows
-3. Print the array',
+  'Create NumPy Arrays of Different Dimensions',
+  'Task
+Complete the missing parts of the code to create 0D, 1D, 2D, and 3D NumPy arrays.
+Note: You can use different numbers inside the arrays for your submission.',
   228,
-  E'import numpy as np\n\n# Step 1: Create a 1D array from 10 to 19\narr = \n\n# Step 2: Reshape into 2 rows\narr_2d = \n\n# Step 3: Print\nprint(arr_2d)',
+  E'import numpy as np\n\n# arr0 → 0D array\narr0 = \n\n# arr1 → 1D array\narr1 = \n\n# arr2 → 2D array\narr2 = \n\n# arr3 → 3D array\narr3 = \n\nprint(arr0)\nprint(arr1)\nprint(arr2)\nprint(arr3._____)',
   71,
   2,
   'medium',
-  '["Use np.arange(10, 20) to create the 1D array from 10 to 19.", "Use .reshape(2, 5) to convert to 2 rows and 5 columns."]',
-  E'import numpy as np\n\narr = np.arange(10, 20)\narr_2d = arr.reshape(2, 5)\nprint(arr_2d)'
+  '["Use np.array() and provide different nested lists depending on the dimension", "Use .ndim to print the dimension"]',
+  E'import numpy as np\n\n# arr0 → 0D array\narr0 = np.array(42)\n\n# arr1 → 1D array\narr1 = np.array([1, 2, 3, 4, 5])\n\n# arr2 → 2D array\narr2 = np.array([[1, 2, 3], [4, 5, 6]])\n\n# arr3 → 3D array\narr3 = np.array([[[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]]])\n\nprint(arr0)\nprint(arr1)\nprint(arr2)\nprint(arr3.ndim)'
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  title = EXCLUDED.title,
+  description = EXCLUDED.description,
+  initial_code = EXCLUDED.initial_code,
+  hints = EXCLUDED.hints,
+  solution = EXCLUDED.solution;

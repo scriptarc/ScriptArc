@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,9 +11,10 @@ import Editor from '@monaco-editor/react';
 import {
   Play, Pause, Volume2, VolumeX, ChevronRight, Star, Lightbulb,
   CheckCircle, XCircle, Loader2, ArrowLeft, Code2, AlertTriangle,
-  Trophy, ArrowRight, Lock, Target, Maximize, Minimize, Zap
+  Trophy, ArrowRight, Lock, Target, Maximize, Minimize, Zap, X
 } from 'lucide-react';
 import { RoundSpinner } from '@/components/ui/spinner';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
 const LANGUAGE_MAP = {
   71: { name: 'Python', monaco: 'python' },
@@ -25,6 +27,8 @@ const LANGUAGE_MAP = {
 const Learn = () => {
   const { lessonId } = useParams();
   const navigate = useNavigate();
+  const { user: authUser } = useAuth();
+  const hasSpecialAccess = authUser?.has_special_access === true;
   const videoRef = useRef(null);
 
   // ── Lesson data ─────────────────────────────────────────────
@@ -40,9 +44,11 @@ const Learn = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
+  const [videoError, setVideoError] = useState(false);
   const videoContainerRef = useRef(null);
   const rafRef = useRef(null);
   const lastUpdateRef = useRef(0);
+  const bufferingTimerRef = useRef(null);
 
   // ── Challenge dialog ─────────────────────────────────────────
   const [activeChallenge, setActiveChallenge] = useState(null);
@@ -68,6 +74,14 @@ const Learn = () => {
   const [completedChallenges, setCompletedChallenges] = useState(new Set());
   const [sessionPoints, setSessionPoints] = useState(0);
   const [showComplete, setShowComplete] = useState(false);
+
+  // ── Mobile detection ─────────────────────────────────────────
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // ── Keyboard Shortcuts ───────────────────────────────────────
   useEffect(() => {
@@ -109,7 +123,13 @@ const Learn = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showChallenge, showComplete, isPlaying, challenges, completedChallenges]); // eslint-disable-line
 
-  useEffect(() => { fetchLessonData(); }, [lessonId]); // eslint-disable-line
+  useEffect(() => {
+    setVideoError(false);
+    setIsBuffering(false);
+    clearTimeout(bufferingTimerRef.current);
+    fetchLessonData();
+    return () => clearTimeout(bufferingTimerRef.current);
+  }, [lessonId]); // eslint-disable-line
 
   const fetchLessonData = async () => {
     try {
@@ -127,7 +147,7 @@ const Learn = () => {
         .from('lessons').select('id, title, order_index')
         .eq('course_id', lessonData.course_id)
         .eq('order_index', lessonData.order_index + 1)
-        .single();
+        .maybeSingle();
 
       // Restore existing progress
       const { data: { user } } = await supabase.auth.getUser();
@@ -159,8 +179,8 @@ const Learn = () => {
         lastUpdateRef.current = now;
       }
 
-      // Check for challenge interruptions
-      if (!showChallenge) {
+      // Check for challenge interruptions (skip for special access users)
+      if (!showChallenge && !hasSpecialAccess) {
         const sorted = [...challenges].sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
         // Add a tiny buffer (0.1s) to prevent skipping if frame arrives slightly late
         for (const ch of sorted) {
@@ -227,6 +247,7 @@ const Learn = () => {
 
   // ── Locked seek: can't skip past uncompleted challenges ────
   const getMaxSeekTime = () => {
+    if (hasSpecialAccess) return duration; // special access → unrestricted seek
     const sorted = [...challenges].sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
     for (const ch of sorted) {
       if (!completedChallenges.has(ch.id)) return ch.timestamp_seconds;
@@ -381,28 +402,94 @@ const Learn = () => {
     }
   };
 
-  const submitCode = async () => {
+  // ── Shared: call code execution via Supabase Edge Function ───
+  // Data science courses route to the Python Runner (NumPy, Pandas, etc.)
+  const isDataScienceCourse = (lesson?.title || '').toLowerCase().includes('data science')
+    || (lesson?.course_id === '00000000-0000-0000-0000-000000000001'); // DS course ID
+
+  const executeCode = async (sourceCode, languageId) => {
+    const { data, error } = await supabase.functions.invoke('execute-code', {
+      body: {
+        code: sourceCode,
+        language_id: languageId,
+        use_python_runner: isDataScienceCourse,
+      },
+    });
+    if (error) throw new Error(error.message || 'Edge function error');
+    return data; // { stdout, stderr, compile_output, status, status_id, time, memory }
+  };
+
+  const runCode = async () => {
+    if (!activeChallenge || !code.trim()) return;
+    setSubmitting(true);
+    setCodeResult(null);
+    try {
+      const result = await executeCode(code, activeChallenge.language_id ?? 71);
+      const hasOutput = !!result.stdout?.trim();
+      const hasError = !!(result.stderr?.trim() || result.compile_output?.trim());
+      const errorText = (result.compile_output || result.stderr || '').trim();
+
+      setCodeResult({
+        type: 'test',
+        passed: !hasError && hasOutput,
+        output: result.stdout?.trim() || '(No output)',
+        error: hasError ? errorText : null,
+        time: result.time,
+        status: result.status,
+      });
+    } catch (err) {
+      toast.error('Execution failed: ' + err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitSolution = async () => {
     if (!activeChallenge || !code.trim()) return;
     if (completedChallenges.has(activeChallenge?.id)) return;
+
     setSubmitting(true);
     setCodeResult(null);
     const newAttempt = codeAttemptCount + 1;
     setCodeAttemptCount(newAttempt);
+
     try {
-      // TODO: Replace with Judge0 API
-      const passed = code.trim().length > 0;
+      const result = await executeCode(code, activeChallenge.language_id ?? 71);
+
+      // Judge0 status IDs: 3 = Accepted, others = various failures
+      const hasError = !!(result.stderr?.trim() || result.compile_output?.trim());
+      const passed = result.status_id === 3 && !hasError && !!result.stdout?.trim();
+      const errorText = (result.compile_output || result.stderr || '').trim();
+
       if (passed) {
         const marks = getMarksPreview();
         await saveCodeSubmission(marks);
-        setCodeResult({ passed: true, marks_earned: marks });
-        toast.success(marks === 2 ? '⚡ +2 Points earned!' : marks === 1 ? '✅ +1 Point earned.' : 'Solution viewed: 0 Points earned.');
+        setCodeResult({
+          type: 'submission',
+          passed: true,
+          marks_earned: marks,
+          output: result.stdout?.trim(),
+          time: result.time,
+          status: result.status,
+        });
+        toast.success(marks === 2 ? '⚡ +2 Points earned!' : marks === 1 ? '✅ +1 Point earned.' : 'Solution viewed: 0 Points.');
         await onChallengeComplete(marks);
       } else {
-        setCodeResult({ passed: false });
+        setCodeResult({
+          type: 'submission',
+          passed: false,
+          error: errorText || `Runtime error: ${result.status}`,
+          output: result.stdout?.trim() || null,
+          time: result.time,
+          status: result.status,
+        });
         if (newAttempt >= 2) setShowHintOption(true);
       }
-    } catch { toast.error('Submission failed.'); }
-    finally { setSubmitting(false); }
+    } catch (err) {
+      toast.error('Submission failed: ' + err.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ── Render helpers ───────────────────────────────────────────
@@ -430,14 +517,10 @@ const Learn = () => {
     : 0;
 
   const getVideoUrl = () => {
-    // Always use Supabase Storage — DO NOT use lesson.video_url from DB
-    // (DB may have stale/test URLs stored)
-    const bucketUrl = process.env.REACT_APP_SUPABASE_URL + '/storage/v1/object/public/videos';
-    const filePath = `Course/Data Science/lecture${lesson.order_index}.mp4`;
-    if (window.location.hostname === 'localhost') {
-      return `/${filePath}`;
-    }
-    return `${bucketUrl}/${encodeURI(filePath)}`;
+    // Always use Supabase Storage directly for optimized preloading
+    const bucketUrl = import.meta.env.VITE_SUPABASE_URL || 'https://dktkhwzhlsuahokrsxef.supabase.co';
+    const filePath = `videos/Course/Data Science/lecture${lesson.order_index}.mp4`;
+    return `${bucketUrl}/storage/v1/object/public/${encodeURI(filePath)}`;
   };
 
   return (
@@ -464,12 +547,30 @@ const Learn = () => {
                 <video
                   ref={videoRef}
                   src={getVideoUrl()}
+                  preload="auto"
+                  playsInline
                   className={`${isFullscreen ? 'h-[calc(100vh-80px)]' : 'h-full'} w-full object-contain cursor-pointer`}
                   onLoadedMetadata={handleLoadedMetadata}
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
-                  onWaiting={() => setIsBuffering(true)}
-                  onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
+                  onWaiting={() => {
+                    clearTimeout(bufferingTimerRef.current);
+                    bufferingTimerRef.current = setTimeout(() => setIsBuffering(true), 800);
+                  }}
+                  onPlaying={() => {
+                    clearTimeout(bufferingTimerRef.current);
+                    setIsBuffering(false);
+                    setIsPlaying(true);
+                  }}
+                  onCanPlay={() => {
+                    clearTimeout(bufferingTimerRef.current);
+                    setIsBuffering(false);
+                  }}
+                  onError={() => {
+                    clearTimeout(bufferingTimerRef.current);
+                    setIsBuffering(false);
+                    setVideoError(true);
+                  }}
                   onClick={togglePlay}
                   data-testid="video-player"
                 />
@@ -483,10 +584,31 @@ const Learn = () => {
                 </div>
               )}
 
-              {isBuffering && (
+              {isBuffering && !videoError && (
                 <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none bg-emerald-900/20 backdrop-blur-sm">
                   <div className="bg-emerald-950/80 p-5 rounded-full backdrop-blur-md shadow-2xl border border-emerald-500/30">
                     <RoundSpinner size="xl" color="green" />
+                  </div>
+                </div>
+              )}
+
+              {videoError && (
+                <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+                  <div className="text-center space-y-4">
+                    <XCircle className="w-12 h-12 text-destructive mx-auto" />
+                    <p className="text-white font-medium">Video failed to load</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-white/20 text-white hover:bg-white/10"
+                      onClick={() => {
+                        setVideoError(false);
+                        setIsBuffering(false);
+                        if (videoRef.current) videoRef.current.load();
+                      }}
+                    >
+                      Retry
+                    </Button>
                   </div>
                 </div>
               )}
@@ -511,26 +633,26 @@ const Learn = () => {
                   ))}
                 </div>
                 <div className={`flex items-center justify-between ${isFullscreen ? 'h-full' : 'mt-2'}`}>
-                  <div className="flex items-center gap-4">
-                    <button onClick={togglePlay} className="p-2 hover:bg-white/10 rounded-md transition-colors" data-testid="play-pause-btn">
-                      {isPlaying ? <Pause className="w-5 h-5 text-white" /> : <Play className="w-5 h-5 text-white" />}
+                  <div className="flex items-center gap-2 sm:gap-4">
+                    <button onClick={togglePlay} className="p-1.5 sm:p-2 hover:bg-white/10 rounded-md transition-colors" data-testid="play-pause-btn">
+                      {isPlaying ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 text-white" /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 text-white" />}
                     </button>
-                    <button onClick={toggleMute} className="p-2 hover:bg-white/10 rounded-md transition-colors">
-                      {isMuted ? <VolumeX className="w-5 h-5 text-white" /> : <Volume2 className="w-5 h-5 text-white" />}
+                    <button onClick={toggleMute} className="p-1.5 sm:p-2 hover:bg-white/10 rounded-md transition-colors">
+                      {isMuted ? <VolumeX className="w-4 h-4 sm:w-5 sm:h-5 text-white" /> : <Volume2 className="w-4 h-4 sm:w-5 sm:h-5 text-white" />}
                     </button>
-                    <span className="text-sm text-text-secondary font-mono">
+                    <span className="text-xs sm:text-sm text-text-secondary font-mono">
                       {formatTime(currentTime)} / {formatTime(duration)}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <Target className="w-4 h-4 text-primary" />
-                      <span className="text-sm font-semibold text-white">{sessionPoints}</span>
-                      <span className="text-xs text-text-secondary">points</span>
+                  <div className="flex items-center gap-2 sm:gap-4">
+                    <div className="flex items-center gap-1 sm:gap-2">
+                      <Target className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" />
+                      <span className="text-xs sm:text-sm font-semibold text-white">{sessionPoints}</span>
+                      <span className="hidden sm:inline text-xs text-text-secondary">points</span>
                     </div>
-                    <div className="w-px h-6 bg-border mx-2" />
-                    <button onClick={toggleFullscreen} className="p-2 hover:bg-white/10 rounded-md transition-colors">
-                      {isFullscreen ? <Minimize className="w-5 h-5 text-white" /> : <Maximize className="w-5 h-5 text-white" />}
+                    <div className="hidden sm:block w-px h-6 bg-border mx-1" />
+                    <button onClick={toggleFullscreen} className="p-1.5 sm:p-2 hover:bg-white/10 rounded-md transition-colors">
+                      {isFullscreen ? <Minimize className="w-4 h-4 sm:w-5 sm:h-5 text-white" /> : <Maximize className="w-4 h-4 sm:w-5 sm:h-5 text-white" />}
                     </button>
                   </div>
                 </div>
@@ -549,7 +671,7 @@ const Learn = () => {
         </div>
 
         {/* ── Challenges Panel ── */}
-        <div className="lg:w-1/3 bg-surface border-l border-border p-6 overflow-y-auto">
+        <div className="lg:w-1/3 bg-surface border-t lg:border-t-0 lg:border-l border-border p-4 sm:p-6 overflow-y-auto">
           <h2 className="text-xl font-outfit font-semibold text-foreground mb-1">Challenges</h2>
           <p className="text-sm text-text-secondary mb-4">
             {lesson.title} · {lesson.duration_minutes} min
@@ -561,7 +683,7 @@ const Learn = () => {
                 const done = completedChallenges.has(ch.id);
                 const isMCQ = ch.challenge_type === 'mcq';
 
-                const isLocked = !done && (() => {
+                const isLocked = !done && !hasSpecialAccess && (() => {
                   const sorted = [...challenges].sort((a, b) => a.timestamp_seconds - b.timestamp_seconds);
                   const firstUncompleted = sorted.find(c => !completedChallenges.has(c.id));
                   if (firstUncompleted && firstUncompleted.id === ch.id) {
@@ -623,23 +745,45 @@ const Learn = () => {
           Challenge Dialog
       ═══════════════════════════════════════════════════════════ */}
       <Dialog open={showChallenge} onOpenChange={() => { }}>
-        <DialogContent portalContainer={videoContainerRef.current} className={`${isFullscreen ? 'w-screen h-screen max-w-none max-h-none rounded-none border-0' : 'max-w-2xl max-h-[90vh]'} overflow-hidden bg-surface border-border p-0 flex flex-col`}>
-          <DialogHeader className="p-6 pb-0 flex-shrink-0">
-            <div className="flex items-center gap-2 mb-1">
-              <Badge variant="outline" className={`text-xs ${activeChallenge?.challenge_type === 'mcq' ? 'border-secondary/40 text-secondary' : 'border-primary/40 text-primary'}`}>
-                {activeChallenge?.challenge_type === 'mcq' ? 'MCQ Challenge' : 'Coding Challenge'}
-              </Badge>
-              <Badge variant="outline" className="text-xs border-primary/40 text-primary">
-                🎯 {activeChallenge?.star_value === 2 ? 'Up to 4 points' : '2 points'}
-              </Badge>
-            </div>
-            <DialogTitle className="text-foreground font-outfit text-xl">{activeChallenge?.title}</DialogTitle>
-            <DialogDescription className="text-text-secondary whitespace-pre-line mt-2">
-              {activeChallenge?.description}
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent
+          portalContainer={videoContainerRef.current}
+          aria-describedby={activeChallenge?.challenge_type === 'coding' ? 'coding-challenge-desc' : undefined}
+          className={
+            activeChallenge?.challenge_type === 'coding'
+              ? 'w-screen h-screen max-w-none max-h-none rounded-none border-0 bg-[#0f111a] p-0 flex flex-col'
+              : `${isFullscreen ? 'w-screen h-screen max-w-none max-h-none rounded-none border-0' : 'w-[95vw] sm:max-w-2xl max-h-[92vh]'
+              } overflow-hidden bg-surface border-border p-0 flex flex-col`
+          }
+        >
+          {/* Accessible title/description for coding challenges (visually hidden) */}
+          {activeChallenge?.challenge_type === 'coding' && (
+            <>
+              <DialogTitle className="sr-only">{activeChallenge?.title || 'Coding Challenge'}</DialogTitle>
+              <DialogDescription id="coding-challenge-desc" className="sr-only">
+                {activeChallenge?.description || 'Complete the coding challenge'}
+              </DialogDescription>
+            </>
+          )}
 
-          <div className="p-6 pt-4 flex-1 overflow-y-auto space-y-4">
+          {/* MCQ Header (Only shown for MCQ) */}
+          {activeChallenge?.challenge_type === 'mcq' && (
+            <DialogHeader className="p-4 sm:p-6 pb-0 flex-shrink-0">
+              <div className="flex items-center gap-2 mb-1">
+                <Badge variant="outline" className="text-xs border-secondary/40 text-secondary">
+                  MCQ Challenge
+                </Badge>
+                <Badge variant="outline" className="text-xs border-primary/40 text-primary">
+                  🎯 {activeChallenge?.star_value === 2 ? 'Up to 4 points' : '2 points'}
+                </Badge>
+              </div>
+              <DialogTitle className="text-foreground font-outfit text-xl">{activeChallenge?.title}</DialogTitle>
+              <DialogDescription className="text-text-secondary whitespace-pre-line mt-2">
+                {activeChallenge?.description}
+              </DialogDescription>
+            </DialogHeader>
+          )}
+
+          <div className={activeChallenge?.challenge_type === 'coding' ? 'flex-1 overflow-hidden flex flex-col' : 'p-4 sm:p-6 pt-3 sm:pt-4 flex-1 overflow-y-auto space-y-3 sm:space-y-4'}>
 
             {/* ── MCQ content ── */}
             {activeChallenge?.challenge_type === 'mcq' && (
@@ -653,7 +797,7 @@ const Learn = () => {
                     return (
                       <label
                         key={i}
-                        className={`flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition-all select-none ${isCorrect ? 'border-accent bg-accent/10 text-accent' :
+                        className={`flex items-center gap-3 p-3 sm:p-3.5 min-h-[48px] rounded-xl border cursor-pointer transition-all select-none ${isCorrect ? 'border-accent bg-accent/10 text-accent' :
                           isWrong ? 'border-destructive bg-destructive/10' :
                             isSelected ? 'border-primary bg-primary/10' :
                               'border-border hover:border-primary/40 hover:bg-surface-highlight/50'
@@ -705,7 +849,12 @@ const Learn = () => {
                 )}
 
                 {/* Action button */}
-                <div className="flex justify-end pt-2 border-t border-border mt-auto">
+                <div className="flex justify-end gap-2 pt-2 border-t border-border mt-auto">
+                  {hasSpecialAccess && mcqResult !== 'correct' && (
+                    <Button variant="outline" onClick={resumeVideo} className="border-warning text-warning hover:bg-warning/10" data-testid="skip-challenge-btn">
+                      Skip Challenge
+                    </Button>
+                  )}
                   {mcqResult === 'correct' ? (
                     <Button onClick={resumeVideo} className="btn-primary" data-testid="continue-video-btn">
                       Continue Video
@@ -727,134 +876,227 @@ const Learn = () => {
 
             {/* ── Coding content ── */}
             {activeChallenge?.challenge_type === 'coding' && (
-              <div className={`flex flex-col h-full ${isFullscreen ? 'max-w-6xl mx-auto w-full' : ''}`}>
-                <div className="flex-1 flex flex-col space-y-4 justify-center">
-                  {/* Marks preview */}
-                  <div className="flex items-center justify-between p-3 bg-surface-highlight rounded-md">
-                    <span className="text-sm text-text-secondary">Potential points:</span>
-                    <div className="flex items-center gap-2">
-                      <div className="flex gap-1">
-                        {[1, 2].map(pip => (
-                          <div key={pip} className={`w-6 h-6 rounded border flex items-center justify-center text-xs font-mono font-bold ${getMarksPreview() >= pip ? 'bg-primary/20 border-primary text-primary' : 'bg-surface border-border text-text-secondary'
-                            }`}>{pip}</div>
-                        ))}
-                      </div>
-                      <span className="text-sm font-mono font-bold">{getMarksPreview()} pts</span>
-                      {getMarksPreview() === 2
-                        ? <Zap className="w-4 h-4 text-primary" />
-                        : getMarksPreview() === 1
-                          ? <span className="text-xs text-warning">(reduced)</span>
-                          : <span className="text-xs text-destructive">(no points)</span>}
-                    </div>
+              <div className="flex flex-col h-full bg-[#0f111a]">
+                {/* Header Navbar */}
+                <div className="flex items-center justify-between p-4 border-b border-border/40 bg-[#161b22]">
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline" className="text-xs border-primary/40 text-primary bg-primary/10">
+                      Coding Challenge
+                    </Badge>
+                    <Badge variant="outline" className="text-xs border-primary/40 text-primary bg-primary/10">
+                      <Target className="w-3 h-3 mr-1 text-accent" />
+                      {activeChallenge?.star_value === 2 ? 'Up to 4 points' : '2 points'}
+                    </Badge>
                   </div>
-
-                  {/* Code Editor */}
-                  <div className="border border-border rounded-md overflow-hidden flex-1 flex flex-col min-h-[300px]">
-                    <div className="bg-[#1e1e1e] p-2 border-b border-border flex items-center justify-between">
-                      <Badge className="bg-primary/20 text-primary border-0">
-                        {LANGUAGE_MAP[activeChallenge?.language_id]?.name || 'Python'}
-                      </Badge>
-                      <span className="text-xs text-text-secondary">Attempt #{codeAttemptCount + 1}</span>
-                    </div>
-                    <div className="flex-1">
-                      <Editor
-                        height="100%"
-                        language={LANGUAGE_MAP[activeChallenge?.language_id]?.monaco || 'python'}
-                        theme="vs-dark"
-                        value={code}
-                        onChange={(v) => setCode(v || '')}
-                        options={{ minimap: { enabled: false }, fontSize: 14, fontFamily: 'JetBrains Mono, monospace', padding: { top: 12 }, scrollBeyondLastLine: false }}
-                        data-testid="code-editor"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Hint option */}
-                  {showHintOption && (activeChallenge.hints || []).length > 0 && !currentHint && (
-                    <div className="flex items-center justify-between p-3 bg-warning/10 border border-warning/30 rounded-md">
-                      <div className="flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 text-warning" />
-                        <span className="text-sm text-warning">Struggling? Get a hint (reduces reward to 1 point)</span>
-                      </div>
-                      <Button size="sm" variant="outline" onClick={requestHint}
-                        className="border-warning text-warning hover:bg-warning/10" data-testid="request-hint-btn">
-                        <Lightbulb className="w-4 h-4 mr-1" />
-                        Get Hint
-                      </Button>
-                    </div>
-                  )}
-
-                  {currentHint && (
-                    <div className="p-3 bg-primary/10 border border-primary/30 rounded-md">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Lightbulb className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium text-primary">Hint {hintsUsed}</span>
-                      </div>
-                      <p className="text-sm text-text-secondary">{currentHint}</p>
-                    </div>
-                  )}
-
-                  {/* View Solution */}
-                  {(codeAttemptCount >= 2 || hintsUsed > 0) && activeChallenge?.solution && (
-                    <div className="flex items-center justify-between p-3 bg-secondary/10 border border-secondary/30 rounded-md">
-                      <div className="flex items-center gap-2">
-                        <Code2 className="w-4 h-4 text-secondary" />
-                        <span className="text-sm text-secondary">
-                          {solutionViewed ? 'Solution viewed (0 points)' : 'Warning: Viewing solution results in 0 points for this challenge'}
-                        </span>
-                      </div>
-                      <Button size="sm" variant="outline" onClick={viewSolution}
-                        className="border-secondary text-secondary hover:bg-secondary/10" data-testid="view-solution-btn">
-                        {showSolution ? 'Hide' : 'View'}
-                      </Button>
-                    </div>
-                  )}
-
-                  {showSolution && activeChallenge?.solution && (
-                    <div className="p-4 bg-secondary/5 border border-secondary/20 rounded-md">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Code2 className="w-4 h-4 text-secondary" />
-                        <span className="text-sm font-medium text-secondary">Solution</span>
-                      </div>
-                      <pre className="text-sm font-mono bg-black/30 p-3 rounded overflow-x-auto">{activeChallenge.solution}</pre>
-                    </div>
-                  )}
-
-                  {/* Code result */}
-                  {codeResult && (
-                    <div className={`p-3 rounded-md ${codeResult.passed ? 'bg-accent/10 border border-accent/30' : 'bg-destructive/10 border border-destructive/30'}`}>
-                      <div className="flex items-center gap-2">
-                        {codeResult.passed
-                          ? <CheckCircle className="w-4 h-4 text-accent" />
-                          : <XCircle className="w-4 h-4 text-destructive" />}
-                        <span className={`text-sm font-medium ${codeResult.passed ? 'text-accent' : 'text-destructive'}`}>
-                          {codeResult.passed
-                            ? (codeResult.marks_earned === 2 ? '⚡ +2 Points earned!' : codeResult.marks_earned === 1 ? '✅ +1 Point earned' : 'Completed (0 Points)')
-                            : 'Not quite right — try again'}
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                  <button onClick={resumeVideo} className="p-2 text-text-secondary hover:text-white transition-colors rounded-md hover:bg-white/10" data-testid="close-challenge-btn">
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
 
-                {/* Actions */}
-                <div className="flex items-center justify-between pt-2 border-t border-border mt-auto">
-                  {completedChallenges.has(activeChallenge?.id) ? (
-                    <Button variant="ghost" onClick={resumeVideo} className="text-accent" data-testid="continue-btn">
-                      Continue <ArrowRight className="w-4 h-4 ml-1" />
-                    </Button>
-                  ) : (
-                    <span className="text-xs text-text-secondary">Complete this challenge to continue</span>
-                  )}
-                  <Button
-                    onClick={submitCode}
-                    disabled={submitting || completedChallenges.has(activeChallenge?.id)}
-                    className="btn-primary"
-                    data-testid="submit-code-btn"
-                  >
-                    {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-                    Run Code
-                  </Button>
+                {/* Resizable Panels */}
+                <div className="flex-1 overflow-hidden">
+                  <PanelGroup direction={isMobile ? "vertical" : "horizontal"}>
+                    {/* Left/Top Panel: Description and Output */}
+                    <Panel defaultSize={isMobile ? 50 : 40} minSize={25} className="bg-[#0f111a] flex flex-col p-4">
+                      <PanelGroup direction="vertical">
+                        {/* Description Panel */}
+                        <Panel defaultSize={60} minSize={30} className="flex flex-col pr-2 pb-2 overflow-y-auto">
+                          <h2 className="text-2xl font-bold font-outfit text-white mb-4">{activeChallenge?.title}</h2>
+                          <div className="text-text-secondary whitespace-pre-line mb-8 text-[15px] leading-relaxed">
+                            {activeChallenge?.description}
+                          </div>
+
+                          {/* Marks preview */}
+                          <div className="flex items-center justify-between p-4 bg-[#161b22] border border-border/40 rounded-xl mb-6">
+                            <span className="text-sm text-text-secondary">Potential points:</span>
+                            <div className="flex items-center gap-3">
+                              <div className="flex gap-1.5">
+                                {[1, 2].map(pip => (
+                                  <div key={pip} className={`w-7 h-7 rounded border flex items-center justify-center text-sm font-mono font-bold ${getMarksPreview() >= pip ? 'bg-primary/20 border-primary text-primary' : 'bg-surface border-border text-text-secondary'
+                                    }`}>{pip}</div>
+                                ))}
+                              </div>
+                              <span className="text-base font-mono font-bold text-white">{getMarksPreview()} pts</span>
+                              {getMarksPreview() === 2
+                                ? <Zap className="w-4 h-4 text-primary" />
+                                : getMarksPreview() === 1
+                                  ? <span className="text-xs text-warning">(reduced)</span>
+                                  : <span className="text-xs text-destructive">(no points)</span>}
+                            </div>
+                          </div>
+
+                          {/* Hint & Solution options */}
+                          <div className="space-y-4">
+                            {showHintOption && (activeChallenge.hints || []).length > 0 && !currentHint && (
+                              <div className="flex items-center justify-between p-4 bg-warning/10 border border-warning/30 rounded-xl">
+                                <div className="flex items-center gap-2">
+                                  <AlertTriangle className="w-4 h-4 text-warning" />
+                                  <span className="text-sm text-warning">Struggling? Get a hint (reduces to 1 point)</span>
+                                </div>
+                                <Button size="sm" variant="outline" onClick={requestHint}
+                                  className="border-warning text-warning hover:bg-warning/10" data-testid="request-hint-btn">
+                                  <Lightbulb className="w-4 h-4 mr-1" />
+                                  Get Hint
+                                </Button>
+                              </div>
+                            )}
+
+                            {currentHint && (
+                              <div className="p-4 bg-primary/10 border border-primary/30 rounded-xl">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Lightbulb className="w-4 h-4 text-primary" />
+                                  <span className="text-sm font-medium text-primary">Hint {hintsUsed}</span>
+                                </div>
+                                <p className="text-sm text-text-secondary leading-relaxed">{currentHint}</p>
+                              </div>
+                            )}
+
+                            {(codeAttemptCount >= 2 || hintsUsed > 0) && activeChallenge?.solution && (
+                              <div className="flex items-center justify-between p-4 bg-secondary/10 border border-secondary/30 rounded-xl">
+                                <div className="flex items-center gap-2">
+                                  <Code2 className="w-4 h-4 text-secondary" />
+                                  <span className="text-sm text-secondary">
+                                    {solutionViewed ? 'Solution viewed (0 points)' : 'Warning: Viewing solution results in 0 points'}
+                                  </span>
+                                </div>
+                                <Button size="sm" variant="outline" onClick={viewSolution}
+                                  className="border-secondary text-secondary hover:bg-secondary/10" data-testid="view-solution-btn">
+                                  {showSolution ? 'Hide' : 'View'}
+                                </Button>
+                              </div>
+                            )}
+
+                            {showSolution && activeChallenge?.solution && (
+                              <div className="p-4 bg-secondary/5 border border-secondary/20 rounded-xl">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Code2 className="w-4 h-4 text-secondary" />
+                                  <span className="text-sm font-medium text-secondary">Solution</span>
+                                </div>
+                                <pre className="text-sm font-mono bg-[#0d1017] p-4 rounded-lg overflow-x-auto text-text-secondary border border-border/40">
+                                  {activeChallenge.solution}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        </Panel>
+
+                        <PanelResizeHandle className="h-1.5 bg-border/40 hover:bg-primary/50 transition-colors cursor-row-resize flex items-center justify-center my-2">
+                          <div className="w-8 h-1 bg-surface-highlight rounded" />
+                        </PanelResizeHandle>
+
+                        {/* Output Panel & Buttons */}
+                        <Panel defaultSize={40} minSize={20} className="flex flex-col border border-border/40 rounded-xl overflow-hidden bg-[#161b22]">
+                          <div className="bg-[#1e1e1e] p-3 border-b border-border/40 flex items-center justify-between">
+                            <span className="text-xs font-mono text-text-secondary uppercase tracking-wider ml-2">Code Output</span>
+
+                            <div className="flex items-center gap-2">
+                              {hasSpecialAccess && codeResult?.type !== 'submission' && (
+                                <Button size="sm" variant="outline" onClick={resumeVideo} className="text-warning h-8 text-xs">Skip</Button>
+                              )}
+                              <Button size="sm" variant="outline" onClick={runCode} disabled={submitting} className="h-8 text-xs text-blue-400 border-blue-400 bg-blue-400/10 hover:bg-blue-400/20">
+                                {submitting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Play className="w-3 h-3 mr-1" />}
+                                Run Code
+                              </Button>
+                              <Button size="sm" onClick={submitSolution} disabled={submitting} className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white">
+                                {submitting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <CheckCircle className="w-3 h-3 mr-1" />}
+                                Check Solution
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="flex-1 p-4 overflow-y-auto font-mono text-sm bg-black text-white whitespace-pre-wrap">
+                            {codeResult ? (
+                              <>
+                                <div className={`mb-3 pb-2 border-b text-xs font-bold ${codeResult.passed ? 'text-emerald-400 border-emerald-900/50' : 'text-red-400 border-red-900/50'}`}>
+                                  STATUS: {codeResult.passed ? 'Accepted' : 'Failed'}
+                                  {codeResult.time ? ` (${codeResult.time}s)` : ''}
+                                  {codeResult.type === 'submission' && codeResult.passed && ` • Earned +${codeResult.marks_earned} pts`}
+                                </div>
+                                {codeResult.error ? (
+                                  <span className="text-red-400">{codeResult.error}</span>
+                                ) : (
+                                  <span className="text-gray-300">{codeResult.output || '(No output)'}</span>
+                                )}
+                                {codeResult.type === 'submission' && codeResult.passed && !completedChallenges.has(activeChallenge?.id) && (
+                                  <div className="mt-4 pt-4 border-t border-emerald-900/50">
+                                    <Button onClick={resumeVideo} className="bg-emerald-500 hover:bg-emerald-400 text-white w-full">
+                                      Continue Video
+                                      <ArrowRight className="w-4 h-4 ml-2" />
+                                    </Button>
+                                  </div>
+                                )}
+                                {codeResult.type === 'submission' && codeResult.passed && completedChallenges.has(activeChallenge?.id) && (
+                                  <div className="mt-4 pt-4 border-t border-emerald-900/50">
+                                    <Button onClick={resumeVideo} className="bg-emerald-500 hover:bg-emerald-400 text-white w-full">
+                                      Close & Continue
+                                      <ArrowRight className="w-4 h-4 ml-2" />
+                                    </Button>
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-text-secondary opacity-50">Run code to see output...</span>
+                            )}
+                          </div>
+                        </Panel>
+                      </PanelGroup>
+                    </Panel>
+
+                    <PanelResizeHandle className={`${isMobile ? 'h-1.5 cursor-row-resize' : 'w-1.5 cursor-col-resize'} bg-border/40 hover:bg-primary/50 transition-colors flex items-center justify-center`}>
+                      <div className={isMobile ? 'w-8 h-1 bg-surface-highlight rounded' : 'h-8 w-1 bg-surface-highlight rounded'} />
+                    </PanelResizeHandle>
+
+                    {/* Right/Bottom Panel: Code Editor */}
+                    <Panel defaultSize={isMobile ? 50 : 60} minSize={30} className={`flex flex-col ${isMobile ? 'px-4 pb-4 pt-0' : 'pl-4 py-4 pr-6'}`}>
+                      <div className="flex flex-col h-full bg-[#161b22] border border-border/40 rounded-xl overflow-hidden">
+                        {/* Editor Header */}
+                        <div className="bg-[#1e1e1e] p-3 border-b border-border/40 flex items-center justify-between shadow-sm z-10">
+                          <span className="text-xs font-mono text-text-secondary uppercase tracking-wider ml-2">Code Editor</span>
+                          <div className="flex items-center gap-3 mr-2">
+                            <Badge className="bg-primary/10 text-primary border-primary/20 pointer-events-none">
+                              {LANGUAGE_MAP[activeChallenge?.language_id]?.name || 'Python'}
+                            </Badge>
+                            <span className="text-xs text-text-secondary font-mono">Attempt #{codeAttemptCount + 1}</span>
+                          </div>
+                        </div>
+
+                        {/* Editor Content */}
+                        <div className="flex-1 relative">
+                          <Editor
+                            height="100%"
+                            language={LANGUAGE_MAP[activeChallenge?.language_id]?.monaco || 'python'}
+                            theme="vs-dark"
+                            value={code}
+                            onChange={(v) => setCode(v || '')}
+                            options={{
+                              minimap: { enabled: false },
+                              fontSize: isMobile ? 13 : 15,
+                              fontFamily: 'JetBrains Mono, monospace',
+                              padding: { top: 12 },
+                              scrollBeyondLastLine: false,
+                              lineHeight: isMobile ? 20 : 24,
+                              renderLineHighlight: 'all',
+                              wordWrap: isMobile ? 'on' : 'off',
+                            }}
+                            onMount={(editor) => {
+                              // Intercept keyboard shortcuts
+                              editor.onKeyDown((e) => {
+                                // Block Copy (C=33), Paste (V=52), and Cut (X=54) for non-special users
+                                if ((e.ctrlKey || e.metaKey) && (e.keyCode === 33 || e.keyCode === 52 || e.keyCode === 54)) {
+                                  if (!hasSpecialAccess) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    toast.error('Copy & Paste is disabled for challenges!');
+                                  }
+                                }
+                              });
+                            }}
+                            data-testid="code-editor"
+                          />
+                        </div>
+                      </div>
+                    </Panel>
+                  </PanelGroup>
                 </div>
               </div>
             )}
@@ -866,7 +1108,9 @@ const Learn = () => {
           Lesson Complete Dialog
       ═══════════════════════════════════════════════════════════ */}
       <Dialog open={showComplete} onOpenChange={() => { }}>
-        <DialogContent className="max-w-md bg-surface border-border text-center p-8">
+        <DialogContent className="w-[92vw] sm:max-w-md bg-surface border-border text-center p-6 sm:p-8" aria-describedby="lesson-complete-desc">
+          <DialogTitle className="sr-only">Lesson Complete</DialogTitle>
+          <DialogDescription id="lesson-complete-desc" className="sr-only">You have completed all challenges in this lesson.</DialogDescription>
           <div className="flex flex-col items-center gap-4">
             <div className="w-20 h-20 rounded-full bg-accent/15 flex items-center justify-center">
               <Trophy className="w-10 h-10 text-accent" />

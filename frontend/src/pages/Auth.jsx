@@ -100,16 +100,14 @@ const Auth = () => {
 
   const handleRoleConfirm = async () => {
     setShowRolePicker(false);
-    await initiateGoogleOAuth(selectedRole);
+    await initiateGoogleOAuth();
   };
 
-  const initiateGoogleOAuth = async (role) => {
+  const initiateGoogleOAuth = async () => {
     setGoogleLoading(true);
     try {
-      const baseUrl = process.env.REACT_APP_PUBLIC_URL || window.location.origin;
-      const redirectUrl = role
-        ? `${baseUrl}/login?role=${role}&google=1`
-        : `${baseUrl}/login?google=1`;
+      const baseUrl = window.location.origin;
+      const redirectUrl = `${baseUrl}/login`;
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',

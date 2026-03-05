@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
@@ -5,15 +6,17 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import Navbar from "@/components/Navbar";
 import Starfield from "@/components/ui/Starfield";
 import AmbientBackground from "@/components/ui/AmbientBackground";
-import Landing from "@/pages/Landing";
-import Auth from "@/pages/Auth";
-import Dashboard from "@/pages/Dashboard";
-import Courses from "@/pages/Courses";
-import CourseSingle from "@/pages/CourseSingle";
-import Learn from "@/pages/Learn";
-import Leaderboard from "@/pages/Leaderboard";
-import Profile from "@/pages/Profile";
 import "@/App.css";
+
+const Landing = lazy(() => import("@/pages/Landing"));
+const Auth = lazy(() => import("@/pages/Auth"));
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const Courses = lazy(() => import("@/pages/Courses"));
+const CourseSingle = lazy(() => import("@/pages/CourseSingle"));
+const Learn = lazy(() => import("@/pages/Learn"));
+const Leaderboard = lazy(() => import("@/pages/Leaderboard"));
+const Profile = lazy(() => import("@/pages/Profile"));
+const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
 
 // Protected Route
 const ProtectedRoute = ({ children }) => {
@@ -89,6 +92,7 @@ function AppRoutes() {
       <Route path="/" element={<PublicRoute><Page><Landing /></Page></PublicRoute>} />
       <Route path="/login" element={<PublicRoute><Page><Auth /></Page></PublicRoute>} />
       <Route path="/register" element={<PublicRoute><Page><Auth /></Page></PublicRoute>} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
 
       <Route path="/dashboard" element={
         <ProtectedRoute><AppLayout><Page><Dashboard /></Page></AppLayout></ProtectedRoute>
@@ -132,7 +136,9 @@ function AppInner() {
       />
       {/* App content — z-10 */}
       <div style={{ position: 'relative', zIndex: 10 }}>
-        <AppRoutes />
+        <Suspense fallback={<SplashScreen />}>
+          <AppRoutes />
+        </Suspense>
       </div>
       <Toaster
         position="top-right"

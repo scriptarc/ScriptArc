@@ -90,7 +90,7 @@ const Courses = () => {
               data-testid="course-search"
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {['all', 'beginner', 'intermediate', 'advanced'].map((level) => (
               <Button
                 key={level}
@@ -121,6 +121,7 @@ const Courses = () => {
                     src={course.thumbnail_url || 'https://images.unsplash.com/photo-1526379095098-d400fd0bf935?w=800'}
                     alt={course.title}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    loading="lazy"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent" />
                   <Badge

@@ -16,6 +16,7 @@ const buildUserFromSession = (authUser) => ({
   role: authUser.user_metadata?.role || 'student',
   total_stars: 0,
   avatar_url: authUser.user_metadata?.avatar_url || null,
+  has_special_access: false,
 });
 
 export const AuthProvider = ({ children }) => {

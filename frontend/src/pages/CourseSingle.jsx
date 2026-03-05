@@ -71,6 +71,7 @@ const CourseSingle = () => {
 
   // A lesson is locked if the previous one is not completed
   const isLocked = (lesson) => {
+    if (user?.has_special_access) return false; // special access bypasses all locks
     if (lesson.order_index === 1) return false;
     const prev = lessons.find(l => l.order_index === lesson.order_index - 1);
     return !prev || !progress[prev.id]?.completed;
@@ -151,7 +152,7 @@ const CourseSingle = () => {
           </div>
         )}
 
-        <div className="grid lg:grid-cols-3 gap-8">
+        <div className="grid lg:grid-cols-3 gap-6 lg:gap-8">
           {/* ── Main Content ── */}
           <div className="lg:col-span-2 space-y-6">
             {/* Course Header */}
@@ -159,7 +160,8 @@ const CourseSingle = () => {
               <img
                 src={course.thumbnail_url || 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200'}
                 alt={course.title}
-                className="w-full h-56 object-cover"
+                className="w-full h-44 sm:h-56 object-cover"
+                loading="lazy"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
               <div className="absolute bottom-0 left-0 right-0 p-6">
@@ -174,7 +176,7 @@ const CourseSingle = () => {
             </div>
 
             {/* Stats row */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
                 { icon: Clock, label: 'Duration', value: `${course.duration_hours}h` },
                 { icon: Code2, label: 'Challenges', value: course.total_challenges || lessons.length },
@@ -208,7 +210,7 @@ const CourseSingle = () => {
                     <div
                       key={lesson.id}
                       onClick={() => startLesson(lesson)}
-                      className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${locked
+                      className={`flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl border transition-all ${locked
                         ? 'border-border/40 opacity-60 cursor-not-allowed'
                         : done
                           ? 'border-accent/40 bg-accent/5 cursor-pointer hover:bg-accent/8'
@@ -273,7 +275,7 @@ const CourseSingle = () => {
           {/* ── Sidebar ── */}
           <div className="space-y-6">
             {/* Progress Card */}
-            <Card className="card-glass sticky top-24" data-testid="enrollment-card">
+            <Card className="card-glass lg:sticky lg:top-24" data-testid="enrollment-card">
               <CardContent className="p-6">
                 {Object.keys(progress).length > 0 ? (
                   <>
