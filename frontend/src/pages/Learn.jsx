@@ -312,7 +312,7 @@ const Learn = () => {
     } else {
       handleUserActivity();
     }
-  }, [isPlaying]);
+  }, [isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update buffered ranges on the native progress event (fires when browser buffers data)
   const handleBufferProgress = useCallback(() => {
