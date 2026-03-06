@@ -6,16 +6,24 @@ import sys
 import tempfile
 import os
 import time
-import resource
 
 app = FastAPI(title="ScriptArc Python Runner", version="1.0.0")
 
-# CORS — allow calls from the Supabase Edge Function
+# CORS — restrict to Supabase Edge Function and local dev only.
+# The Python Runner is called server-to-server by the Edge Function,
+# but this limits browser-direct calls as a defence-in-depth measure.
+_ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get(
+        "ALLOWED_ORIGINS",
+        "http://localhost:3000,http://localhost:54321"
+    ).split(",") if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["POST", "GET", "OPTIONS"],
-    allow_headers=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_methods=["POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 TIMEOUT_SECONDS = 10  # max execution time per request
@@ -32,6 +40,7 @@ class ExecuteResponse(BaseModel):
     stderr: str
     success: bool
     time: float | None = None
+    output_truncated: bool = False
 
 
 @app.get("/")
@@ -51,15 +60,14 @@ def execute_code(req: ExecuteRequest):
 
     # ---------- Security: block dangerous operations ----------
     blocked = [
-        "os.system", "subprocess", "shutil.rmtree", "open(", "__import__",
+        "os.system", "subprocess", "shutil.rmtree", "__import__",
         "exec(", "eval(", "compile(", "exit(", "quit(",
-        "import os", "import sys", "import socket"
+        "import os", "import sys", "import socket", "import subprocess",
+        "from os import", "from sys import", "from socket import",
+        "from subprocess import", "from shutil import",
     ]
     code_lower = req.code.lower()
     for b in blocked:
-        # Allow 'open(' only if it looks like file I/O — block everything else
-        if b == "open(" and "open(" in req.code:
-            continue  # we run in tmpdir anyway, no persistence
         if b.lower() in code_lower:
             return ExecuteResponse(
                 stdout="",
@@ -99,11 +107,14 @@ def execute_code(req: ExecuteRequest):
             stdout, stderr = process.communicate(input=req.stdin or None, timeout=TIMEOUT_SECONDS)
             elapsed = round(time.monotonic() - start, 3)
 
+            stdout_truncated = len(stdout) > MAX_OUTPUT_BYTES
+            stderr_truncated = len(stderr) > MAX_OUTPUT_BYTES
             return ExecuteResponse(
                 stdout=stdout[:MAX_OUTPUT_BYTES],
                 stderr=stderr[:MAX_OUTPUT_BYTES],
                 success=process.returncode == 0,
                 time=elapsed,
+                output_truncated=stdout_truncated or stderr_truncated,
             )
 
         except subprocess.TimeoutExpired:

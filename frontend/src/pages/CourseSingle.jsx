@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -40,28 +40,26 @@ const CourseSingle = () => {
 
   const fetchCourseData = async () => {
     try {
-      // Course
-      const { data: courseData, error: courseErr } = await supabase
-        .from('courses').select('*').eq('id', id).single();
-      if (courseErr || !courseData) { setLoading(false); return; }
+      // Fetch course, lessons, and challenge counts in parallel
+      const [courseRes, lessonRes, challengeRes] = await Promise.all([
+        supabase.from('courses').select('*').eq('id', id).single(),
+        supabase.from('lessons').select('*').eq('course_id', id).order('order_index', { ascending: true }),
+        supabase.from('challenges').select('challenge_type').eq('course_id', id),
+      ]);
 
-      // Lessons ordered
-      const { data: lessonData } = await supabase
-        .from('lessons').select('*')
-        .eq('course_id', id)
-        .order('order_index', { ascending: true });
+      if (courseRes.error || !courseRes.data) { setLoading(false); return; }
 
-      // Challenges — compute max points (MCQ=2, Coding=4)
-      const { data: challengeData } = await supabase
-        .from('challenges').select('challenge_type')
-        .eq('course_id', id);
-      const mcqCount = (challengeData || []).filter(c => c.challenge_type === 'mcq').length;
-      const codingCount = (challengeData || []).filter(c => c.challenge_type === 'coding').length;
+      const courseData = courseRes.data;
+      const lessonData = lessonRes.data || [];
+      const challengeData = challengeRes.data || [];
+
+      const mcqCount = challengeData.filter(c => c.challenge_type === 'mcq').length;
+      const codingCount = challengeData.filter(c => c.challenge_type === 'coding').length;
       setComputedMaxPoints(mcqCount * 2 + codingCount * 4);
 
-      // User progress
+      // Fetch user progress only if there are lessons
       let progressMap = {};
-      if (user && lessonData?.length) {
+      if (user && lessonData.length) {
         const lessonIds = lessonData.map(l => l.id);
         const { data: progressData } = await supabase
           .from('user_progress').select('*')
@@ -73,11 +71,10 @@ const CourseSingle = () => {
       }
 
       setCourse(courseData);
-      setLessons(lessonData || []);
+      setLessons(lessonData);
       setProgress(progressMap);
 
-      // Check full completion
-      if (lessonData?.length && lessonData.every(l => progressMap[l.id]?.completed)) {
+      if (lessonData.length && lessonData.every(l => progressMap[l.id]?.completed)) {
         setShowCompletion(true);
       }
     } catch { /* ignore */ }
@@ -104,6 +101,10 @@ const CourseSingle = () => {
   const continueLessonId = lessons.find(
     l => !progress[l.id]?.completed && !isLocked(l)
   )?.id || lessons[0]?.id;
+
+  // Memoize lesson lists to avoid re-filtering on every render
+  const unit1Lessons = useMemo(() => lessons.filter(l => l.order_index <= 11), [lessons]);
+  const unit2Lessons = useMemo(() => lessons.filter(l => l.order_index > 11), [lessons]);
 
   const totalPoints = Object.values(progress).reduce((sum, p) => sum + (p.stars_earned || 0), 0);
   const completedLessonsCount = Object.values(progress).filter(p => p.completed).length;
@@ -223,7 +224,7 @@ const CourseSingle = () => {
                       Unit 1: Fundamentals
                     </AccordionTrigger>
                     <AccordionContent className="space-y-2 pt-2 pb-4">
-                      {lessons.filter(l => l.order_index <= 11).map((lesson) => {
+                      {unit1Lessons.map((lesson) => {
                         const prog = progress[lesson.id];
                         const done = prog?.completed;
                         const locked = isLocked(lesson);
@@ -282,13 +283,13 @@ const CourseSingle = () => {
                   </AccordionItem>
 
                   {/* UNIT 2 */}
-                  {lessons.some(l => l.order_index > 11) && (
+                  {unit2Lessons.length > 0 && (
                     <AccordionItem value="unit-2" className="border-border border-b-0">
                       <AccordionTrigger className="text-lg font-outfit font-semibold hover:no-underline hover:text-primary transition-colors py-4">
                         Unit 2: Advanced Techniques
                       </AccordionTrigger>
                       <AccordionContent className="space-y-2 pt-2 pb-4">
-                        {lessons.filter(l => l.order_index > 11).map((lesson) => {
+                        {unit2Lessons.map((lesson) => {
                           const prog = progress[lesson.id];
                           const done = prog?.completed;
                           const locked = isLocked(lesson);

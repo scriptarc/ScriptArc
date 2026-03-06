@@ -95,12 +95,14 @@ const Auth = () => {
     }
 
     // Direct sign in from login tab
+    localStorage.setItem('googleAuthAction', 'login');
     await initiateGoogleOAuth();
   };
 
   const handleRoleConfirm = async () => {
     setShowRolePicker(false);
     localStorage.setItem('pendingRole', selectedRole);
+    localStorage.setItem('googleAuthAction', 'register');
     await initiateGoogleOAuth();
   };
 

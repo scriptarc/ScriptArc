@@ -151,7 +151,7 @@ const Landing = () => {
 
   const howItWorks = [
     { step: '01', title: 'Watch & Learn', desc: 'Engaging video lessons explain concepts clearly', icon: Play },
-    { step: '02', title: 'Stop & Solve', desc: 'Videos pause automatically for coding challenges', icon: Code2 },
+    { step: '02', title: 'Start & Solve', desc: 'Videos pause automatically for coding challenges', icon: Code2 },
     { step: '03', title: 'Earn Points', desc: 'Solve challenges to earn points and complete courses for stars', icon: Zap },
   ];
 
@@ -275,7 +275,7 @@ const Landing = () => {
 
               {/* Headline */}
               <h1 className="text-5xl md:text-6xl lg:text-7xl font-outfit font-bold text-foreground mb-6 tracking-tight leading-[1.05]">
-                Stop. Solve.{' '}
+                Start. Solve.{' '}
                 <span className="gradient-text succeed-glow">Succeed.</span>
               </h1>
 
@@ -628,7 +628,7 @@ const Landing = () => {
             <span className="text-foreground">Script<span className="text-primary">Arc</span></span>
           </div>
           <p className="text-muted-foreground text-sm">
-            © 2026 ScriptArc. Learn. Solve. Succeed.
+            © 2026 ScriptArc. Start. Solve. Succeed.
           </p>
         </div>
       </footer>

@@ -35,7 +35,7 @@ export const AuthProvider = ({ children }) => {
       try {
         const { data, error } = await supabase
           .from('users')
-          .select('*, avatar_id')
+          .select('id, name, role, total_stars, level, is_private, avatar_id, has_special_access, created_at')
           .eq('id', sessionUser.id)
           .single();
 
@@ -62,12 +62,15 @@ export const AuthProvider = ({ children }) => {
           } else {
             setLoading(false);
           }
-        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        } else if (event === 'SIGNED_IN') {
           if (session?.user) {
             fetchExtendedUser(session.user);
           } else {
             setLoading(false);
           }
+        } else if (event === 'TOKEN_REFRESHED') {
+          // Token refreshed — no need to re-fetch user profile; session is still valid
+          if (mounted) setLoading(false);
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
           setLoading(false);

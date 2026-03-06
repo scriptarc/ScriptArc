@@ -52,7 +52,7 @@ const Courses = () => {
 
   const filteredCourses = courses.filter((course) => {
     const matchesSearch = course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      course.description.toLowerCase().includes(searchQuery.toLowerCase());
+      (course.description || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesLevel = selectedLevel === 'all' || course.level === selectedLevel;
     return matchesSearch && matchesLevel;
   });

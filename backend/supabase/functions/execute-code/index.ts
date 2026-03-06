@@ -10,11 +10,20 @@
 const JUDGE0_URL = 'https://ce.judge0.com/submissions';
 const PYTHON_RUNNER_URL = Deno.env.get('PYTHON_RUNNER_URL') ?? '';
 
+// Restrict CORS to known origins. Add production domain to ALLOWED_ORIGINS env var.
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? 'http://localhost:3000').split(',').map(o => o.trim());
 
-const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+function getCorsHeaders(origin: string) {
+    const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+    return {
+        'Access-Control-Allow-Origin': allowed,
+        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+    };
+}
 
 // ── Helper: execute via Python Runner (data science) ──────────
 async function executePythonRunner(code: string, stdin: string) {
@@ -86,6 +95,9 @@ async function executeJudge0(code: string, languageId: number, stdin: string) {
 
 // ── Main handler ──────────────────────────────────────────────
 Deno.serve(async (req) => {
+    const origin = req.headers.get('origin') ?? '';
+    const corsHeaders = getCorsHeaders(origin);
+
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
     }
@@ -109,12 +121,12 @@ Deno.serve(async (req) => {
                 result = await executePythonRunner(code, stdin);
             } catch (pyErr) {
                 console.warn(`[execute-code] Python Runner failed: ${pyErr}. Falling back to Judge0.`);
-                // Fall through to Judge0
                 try {
                     result = await executeJudge0(code, langId, stdin);
                 } catch (j0Err) {
+                    console.error('[execute-code] Both engines failed:', pyErr, j0Err);
                     return new Response(
-                        JSON.stringify({ error: `Python Runner: ${pyErr}. Judge0: ${j0Err}.` }),
+                        JSON.stringify({ error: 'Code execution service is temporarily unavailable. Please try again.' }),
                         { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
                     );
                 }
@@ -124,8 +136,9 @@ Deno.serve(async (req) => {
             try {
                 result = await executeJudge0(code, langId, stdin);
             } catch (judge0Err) {
+                console.error('[execute-code] Judge0 failed:', judge0Err);
                 return new Response(
-                    JSON.stringify({ error: `Judge0: ${judge0Err}.` }),
+                    JSON.stringify({ error: 'Code execution service is temporarily unavailable. Please try again.' }),
                     { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
                 );
             }
@@ -137,9 +150,9 @@ Deno.serve(async (req) => {
         });
 
     } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        console.error('[execute-code] Unhandled error:', err);
         return new Response(
-            JSON.stringify({ error: `Internal error: ${message}` }),
+            JSON.stringify({ error: 'An unexpected error occurred. Please try again.' }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
     }

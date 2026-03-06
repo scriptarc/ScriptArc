@@ -21,18 +21,46 @@ const AuthCallback = () => {
                 }
 
                 if (data?.session) {
+                    const user = data.session.user;
+                    const authAction = localStorage.getItem('googleAuthAction');
                     const pendingRole = localStorage.getItem('pendingRole');
-                    if (pendingRole) {
-                        localStorage.removeItem('pendingRole');
-                        await supabase.auth.updateUser({ data: { role: pendingRole } });
+
+                    // Check if this is a brand new user (created within the last 5 seconds)
+                    const isNewUser = new Date(user.last_sign_in_at).getTime() - new Date(user.created_at).getTime() < 5000;
+
+                    if (authAction === 'login') {
+                        if (isNewUser || user.user_metadata?.is_ghost) {
+                            // User tried to log in but they don't have an account
+                            if (isNewUser) {
+                                // Mark them as a ghost so future login attempts also fail until they properly register
+                                await supabase.auth.updateUser({ data: { is_ghost: true } });
+                            }
+                            await supabase.auth.signOut();
+                            localStorage.removeItem('googleAuthAction');
+                            toast.error('Account not found. Please sign up first.');
+                            if (mounted) navigate('/register', { replace: true });
+                            return;
+                        }
                     }
+
+                    if (authAction === 'register' || pendingRole || user.user_metadata?.is_ghost) {
+                        // User went through the sign-up flow, so finalize it.
+                        // Role is set via auth metadata which the handle_new_user trigger reads.
+                        // The prevent_privilege_escalation trigger blocks direct DB role updates,
+                        // so we only update auth metadata here.
+                        const roleToSet = pendingRole || 'student';
+                        await supabase.auth.updateUser({ data: { role: roleToSet, is_ghost: null } });
+                        localStorage.removeItem('pendingRole');
+                    }
+
+                    localStorage.removeItem('googleAuthAction');
                     if (mounted) navigate('/dashboard', { replace: true });
                 } else {
                     // Fallback if no session was established
                     if (mounted) navigate('/login', { replace: true });
                 }
             } catch (err) {
-                console.error('Auth Callback Error:', err);
+                if (process.env.NODE_ENV !== 'production') console.error('Auth Callback Error:', err);
                 if (mounted) {
                     setError(err.message || 'Authentication failed');
                     toast.error('Authentication failed. Please try again.');

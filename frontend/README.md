@@ -1,70 +1,48 @@
-# Getting Started with Create React App
+# ScriptArc — Frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+React 19 frontend for ScriptArc, built with Create React App + CRACO, Tailwind CSS, Radix UI.
 
-## Available Scripts
+## Commands
 
-In the project directory, you can run:
+```bash
+yarn start        # Dev server on http://localhost:3000
+yarn build        # Production build → build/
+yarn test         # Run tests
+```
 
-### `npm start`
+## Environment Variables
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Create a `.env` file in this directory:
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+```env
+REACT_APP_SUPABASE_URL=https://<project>.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=<anon-key>
+REACT_APP_B2_URL=https://f003.backblazeb2.com/file/<bucket>
+```
 
-### `npm test`
+## Path Alias
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+`@/` maps to `src/` — configured in `craco.config.js`.
 
-### `npm run build`
+## Key Pages
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+| Route | Page | Description |
+|---|---|---|
+| `/` | Landing | Public marketing page |
+| `/login` `/register` | Auth | Email + Google OAuth |
+| `/dashboard` | Dashboard | User progress overview |
+| `/courses` | Courses | Browse all courses |
+| `/courses/:id` | CourseSingle | Course detail + lecture list |
+| `/learn/:lessonId` | Learn | Video player + challenge dialogs |
+| `/leaderboard` | Leaderboard | Global rankings |
+| `/profile` | Profile | Settings, avatar, badges |
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Design System
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+- Dark mode cyber theme, background `#05050F`
+- Fonts: Outfit (headings), Manrope (body), JetBrains Mono (code)
+- Colors via CSS custom properties (`hsl(var(--...))`)
+- Icons: `lucide-react` only
+- Toasts: `sonner`
+- Corners: `rounded-md` / `rounded-sm` max
+- No gradient text

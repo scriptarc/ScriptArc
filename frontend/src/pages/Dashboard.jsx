@@ -27,13 +27,30 @@ const Dashboard = () => {
   useEffect(() => {
     const fetchDashboard = async () => {
       try {
-        const { data: progressList } = await supabase
-          .from('user_progress')
-          .select('course_id, stars_earned, completed_challenge_ids, courses(*)')
-          .eq('user_id', user.id);
+        // Fetch all three in parallel
+        const [progressRes, submissionsRes, rankRes] = await Promise.all([
+          supabase
+            .from('user_progress')
+            .select('course_id, stars_earned, completed_challenge_ids, courses(*)')
+            .eq('user_id', user.id),
+          supabase
+            .from('submissions')
+            .select('id, created_at, stars_awarded')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(5),
+          supabase
+            .from('leaderboard')
+            .select('rank')
+            .eq('id', user.id)
+            .maybeSingle(),
+        ]);
 
+        const progressList = progressRes.data || [];
         const courseMap = {};
-        (progressList || []).forEach(p => {
+        let totalChallengesCompleted = 0;
+        progressList.forEach(p => {
+          totalChallengesCompleted += (p.completed_challenge_ids?.length || 0);
           if (!p.courses) return;
           const cid = p.course_id;
           if (!courseMap[cid]) {
@@ -53,33 +70,17 @@ const Dashboard = () => {
           stars_earned: c.total_stars_earned
         }));
 
-        const { data: submissions } = await supabase
-          .from('submissions')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(5);
-
-        const { data: rankData } = await supabase
-          .from('leaderboard')
-          .select('rank')
-          .eq('id', user.id)
-          .single();
-
         setDashboardData({
-          courses_in_progress: enrollments || [],
-          recent_completions: (submissions || []).map(s => ({
+          courses_in_progress: enrollments,
+          total_challenges_completed: totalChallengesCompleted,
+          recent_completions: (submissionsRes.data || []).map(s => ({
             completed_at: s.created_at,
             stars_awarded: s.stars_awarded || 0,
           })),
-          rank: rankData?.rank || '-',
+          rank: rankRes.data?.rank || '-',
         });
-      } catch (error) {
-        setDashboardData({
-          courses_in_progress: [],
-          recent_completions: [],
-          rank: '-',
-        });
+      } catch {
+        setDashboardData({ courses_in_progress: [], recent_completions: [], rank: '-' });
       } finally {
         setLoading(false);
       }
@@ -149,7 +150,7 @@ const Dashboard = () => {
                 </span>
               </div>
               <div className="text-3xl font-outfit font-bold text-foreground mb-3">
-                {dashboardData?.recent_completions?.length || 0} <span className="text-lg text-muted-foreground font-normal">Solved</span>
+                {dashboardData?.total_challenges_completed || 0} <span className="text-lg text-muted-foreground font-normal">Solved</span>
               </div>
               <p className="text-xs text-muted-foreground mt-4">
                 Keep an active learning routine

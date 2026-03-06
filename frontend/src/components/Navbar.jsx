@@ -123,16 +123,6 @@ const Navbar = () => {
                       <User className="w-4 h-4 mr-2" />
                       Profile
                     </DropdownMenuItem>
-                    {user.role === 'mentor' && (
-                      <DropdownMenuItem
-                        onClick={() => navigate('/mentor')}
-                        className="cursor-pointer hover:bg-white/5"
-                        data-testid="mentor-menu-item"
-                      >
-                        <LayoutDashboard className="w-4 h-4 mr-2" />
-                        Mentor Dashboard
-                      </DropdownMenuItem>
-                    )}
                     <DropdownMenuSeparator className="bg-border" />
                     <DropdownMenuItem
                       onClick={handleLogout}

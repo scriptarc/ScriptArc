@@ -1,20 +1,23 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, Suspense, lazy } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Slider } from '@/components/ui/slider';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import Editor from '@monaco-editor/react';
+const Editor = lazy(() => import('@monaco-editor/react'));
 import {
   Play, Pause, Volume2, VolumeX, ChevronRight, Star, Lightbulb,
   CheckCircle, XCircle, Loader2, ArrowLeft, Code2, AlertTriangle,
-  Trophy, ArrowRight, Lock, Target, Maximize, Minimize, Zap, X
+  Trophy, ArrowRight, Lock, Target, Maximize, Minimize, Zap, X,
+  RotateCcw, RotateCw, Settings, PictureInPicture
 } from 'lucide-react';
 import { RoundSpinner } from '@/components/ui/spinner';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import useHlsPlayer from '@/hooks/useHlsPlayer';
 
 const LANGUAGE_MAP = {
   71: { name: 'Python', monaco: 'python' },
@@ -46,11 +49,25 @@ const Learn = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [videoError, setVideoError] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [showControls, setShowControls] = useState(true);
+  const [isDraggingSeek, setIsDraggingSeek] = useState(false);
+  const [previewTime, setPreviewTime] = useState(null);
+  const [bufferedRanges, setBufferedRanges] = useState([]);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [mobileDoubleTapIndicator, setMobileDoubleTapIndicator] = useState(null);
+
   const videoContainerRef = useRef(null);
   const bufferingTimerRef = useRef(null);
+  const controlsTimeoutRef = useRef(null);
   const lastTimeUpdateRef = useRef(0);
   const sortedChallengesRef = useRef([]);
   const completedChallengesRef = useRef(new Set());
+  const keydownHandlerRef = useRef(null);
+  // Refs for double-tap detection (avoids cross-tab interference via window globals)
+  const lastTapTimeLeftRef = useRef(0);
+  const lastTapTimeRightRef = useRef(0);
 
   // ── Challenge dialog ─────────────────────────────────────────
   const [activeChallenge, setActiveChallenge] = useState(null);
@@ -93,62 +110,63 @@ const Learn = () => {
     completedChallengesRef.current = completedChallenges;
   }, [completedChallenges]);
 
-  // ── Memoize video URL so it never changes within the same lesson ──
+  // ── Memoize video URL — prefer HLS (.m3u8) playlist, fallback to MP4 ──
   const videoUrl = useMemo(() => {
     if (!lesson) return '';
-    const bucketUrl = process.env.REACT_APP_SUPABASE_URL || 'https://dktkhwzhlsuahokrsxef.supabase.co';
+    const b2BaseUrl = process.env.REACT_APP_B2_URL || 'https://f003.backblazeb2.com/file/ScripArc';
     const isDSCourse = (lesson.title || '').toLowerCase().includes('data science')
       || (lesson.course_id === 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c');
-    let filePath = '';
+    let basePath = '';
     if (isDSCourse) {
       const unit = lesson.order_index <= 11 ? 'Unit1' : 'Unit2';
       const fileIndex = lesson.order_index <= 11 ? lesson.order_index : lesson.order_index - 11;
-      filePath = `videos/Course/Data Science/${unit}/lecture${fileIndex}.mp4`;
+      basePath = `Course/Data Science/${unit}/lecture${fileIndex}`;
     } else {
-      filePath = `videos/Course/Data Science/lecture${lesson.order_index}.mp4`;
+      basePath = `Course/Data Science/lecture${lesson.order_index}`;
     }
-    return `${bucketUrl}/storage/v1/object/public/${encodeURI(filePath)}`;
+    const base = b2BaseUrl;
+    // Prefer HLS playlist if one exists; the hook probes and falls back to MP4
+    const hlsUrl = `${base}/${encodeURI(basePath)}/playlist.m3u8`;
+    const mp4Url = `${base}/${encodeURI(basePath)}.mp4`;
+    return { hlsUrl, mp4Url };
   }, [lesson]);
 
+  // ── Attach HLS.js adaptive streaming (tries HLS, falls back to MP4 internally) ──
+  useHlsPlayer(videoRef, videoUrl);
+
   // ── Keyboard Shortcuts ───────────────────────────────────────
+  // Store handler in a ref so the listener doesn't need to be re-attached on every
+  // dependency change, avoiding stale-closure bugs.
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (showChallenge || showComplete || document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
-
+    keydownHandlerRef.current = (e) => {
+      if (showChallenge || showComplete) return;
+      const tag = document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (!videoRef.current) return;
-
       switch (e.code) {
         case 'Space':
           e.preventDefault();
           togglePlay();
+          handleUserActivity();
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+          skipVideo(-10);
           break;
         case 'ArrowRight':
           e.preventDefault();
-          const nextTime = videoRef.current.currentTime + 10;
-          const maxTime = getMaxSeekTime();
-          if (nextTime > maxTime) {
-            videoRef.current.currentTime = maxTime;
-            const blocker = challenges.find(ch => !completedChallenges.has(ch.id) && ch.timestamp_seconds === maxTime);
-            if (blocker) {
-              videoRef.current.pause();
-              setIsPlaying(false);
-              openChallenge(blocker);
-            }
-          } else {
-            videoRef.current.currentTime = nextTime;
-          }
+          skipVideo(10);
           break;
         default: break;
       }
     };
+  }, [showChallenge, showComplete]); // eslint-disable-line
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showChallenge, showComplete, isPlaying, challenges, completedChallenges]); // eslint-disable-line
+  useEffect(() => {
+    const handler = (e) => keydownHandlerRef.current?.(e);
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   useEffect(() => {
     setVideoError(false);
@@ -188,14 +206,17 @@ const Learn = () => {
           if (prog.completed) setShowComplete(true);
         } else {
           // Auto-enroll on first visit so CourseSingle sees progress
-          await supabase.from('user_progress').insert({
+          const { error: insertErr } = await supabase.from('user_progress').upsert({
             user_id: user.id,
             lesson_id: lessonId,
             course_id: lessonData.course_id,
             completed: false,
             stars_earned: 0,
             completed_challenge_ids: []
-          }).select().maybeSingle();
+          }, { onConflict: 'user_id,lesson_id', ignoreDuplicates: true });
+          if (insertErr && process.env.NODE_ENV !== 'production') {
+            console.error('Initial progress insert error:', insertErr);
+          }
         }
       }
 
@@ -215,7 +236,7 @@ const Learn = () => {
 
     // Throttle React state updates to ~2/sec for the progress bar
     const now = performance.now();
-    if (now - lastTimeUpdateRef.current > 500) {
+    if (!isDraggingSeek && now - lastTimeUpdateRef.current > 500) {
       setCurrentTime(time);
       lastTimeUpdateRef.current = now;
     }
@@ -247,16 +268,16 @@ const Learn = () => {
 
   const toggleFullscreen = async () => {
     if (!videoContainerRef.current) return;
-    if (!document.fullscreenElement) {
-      try {
+    try {
+      if (!document.fullscreenElement) {
         await videoContainerRef.current.requestFullscreen();
-        setIsFullscreen(true);
-      } catch (err) { console.error("Error attempting to enable fullscreen:", err); }
-    } else {
-      if (document.exitFullscreen) {
+        // State is set by the fullscreenchange listener below, not here,
+        // to avoid divergence if requestFullscreen() is denied.
+      } else {
         await document.exitFullscreen();
-        setIsFullscreen(false);
       }
+    } catch (err) {
+      console.error('Fullscreen toggle failed:', err);
     }
   };
 
@@ -270,6 +291,124 @@ const Learn = () => {
     if (videoRef.current) setDuration(videoRef.current.duration);
   };
 
+  // ── Smart Video Controls ─────────────────────────────────────
+  const handleUserActivity = () => {
+    setShowControls(true);
+    if (!isPlaying) return;
+    clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => {
+      // Only hide if a menu or input isn't focused
+      if (document.activeElement.tagName !== 'INPUT') {
+        setShowControls(false);
+        setShowSpeedMenu(false);
+      }
+    }, 3000);
+  };
+
+  useEffect(() => {
+    if (!isPlaying) {
+      setShowControls(true);
+      clearTimeout(controlsTimeoutRef.current);
+    } else {
+      handleUserActivity();
+    }
+  }, [isPlaying]);
+
+  // Update buffered ranges on the native progress event (fires when browser buffers data)
+  const handleBufferProgress = useCallback(() => {
+    if (!videoRef.current) return;
+    const buf = videoRef.current.buffered;
+    const ranges = [];
+    for (let i = 0; i < buf.length; i++) {
+      ranges.push({ start: buf.start(i), end: buf.end(i) });
+    }
+    setBufferedRanges(ranges);
+  }, []);
+
+  const handleVolumeChange = (newVolumeArr) => {
+    const vol = newVolumeArr[0];
+    setVolume(vol);
+    if (videoRef.current) {
+      videoRef.current.volume = vol;
+      if (vol === 0) {
+        setIsMuted(true);
+        videoRef.current.muted = true;
+      } else if (isMuted) {
+        setIsMuted(false);
+        videoRef.current.muted = false;
+      }
+    }
+    handleUserActivity();
+  };
+
+  const handleSpeedChange = (speed) => {
+    setPlaybackRate(speed);
+    if (videoRef.current) videoRef.current.playbackRate = speed;
+    setShowSpeedMenu(false);
+    handleUserActivity();
+  };
+
+  const skipVideo = (seconds) => {
+    if (!videoRef.current) return;
+    const nextTime = videoRef.current.currentTime + seconds;
+    const maxTime = getMaxSeekTime();
+
+    if (nextTime > maxTime) {
+      videoRef.current.currentTime = maxTime;
+      const blocker = challenges.find(ch => !completedChallenges.has(ch.id) && ch.timestamp_seconds === maxTime);
+      if (blocker) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+        openChallenge(blocker);
+      }
+    } else {
+      videoRef.current.currentTime = Math.max(0, nextTime);
+    }
+    handleUserActivity();
+  };
+
+  const togglePiP = async () => {
+    if (!document.pictureInPictureEnabled || !videoRef.current) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await videoRef.current.requestPictureInPicture();
+      }
+    } catch (error) {
+      console.error('PiP failed', error);
+    }
+    handleUserActivity();
+  };
+
+  const handleDoubleTapLeft = () => {
+    const now = performance.now();
+    if (now - lastTapTimeLeftRef.current < 400) {
+      setMobileDoubleTapIndicator('left');
+      skipVideo(-10);
+      setTimeout(() => setMobileDoubleTapIndicator(null), 500);
+      lastTapTimeLeftRef.current = 0;
+    } else {
+      lastTapTimeLeftRef.current = now;
+      handleUserActivity();
+      if (!isMobile) togglePlay();
+    }
+  };
+
+  const handleDoubleTapRight = () => {
+    const now = performance.now();
+    if (now - lastTapTimeRightRef.current < 400) {
+      setMobileDoubleTapIndicator('right');
+      skipVideo(10);
+      setTimeout(() => setMobileDoubleTapIndicator(null), 500);
+      lastTapTimeRightRef.current = 0;
+    } else {
+      lastTapTimeRightRef.current = now;
+      handleUserActivity();
+      if (!isMobile) togglePlay();
+    }
+  };
+
   // ── Locked seek: can't skip past uncompleted challenges ────
   const getMaxSeekTime = () => {
     if (hasSpecialAccess) return duration; // special access → unrestricted seek
@@ -280,14 +419,35 @@ const Learn = () => {
     return duration; // all done → full seek
   };
 
-  const handleSeek = (e) => {
-    if (!videoRef.current) return;
+  const handleSeekPointerMove = useCallback((e) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    let targetTime = ((e.clientX - rect.left) / rect.width) * duration;
+    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const targetTime = pos * duration;
+    setPreviewTime(targetTime);
+
+    if (isDraggingSeek) {
+      const maxTime = getMaxSeekTime();
+      setCurrentTime(targetTime > maxTime ? maxTime : targetTime);
+    }
+  }, [duration, isDraggingSeek]); // eslint-disable-line
+
+  const handleSeekPointerDown = useCallback((e) => {
+    setIsDraggingSeek(true);
+    handleSeekPointerMove(e);
+  }, [handleSeekPointerMove]);
+
+  const handleSeekPointerUp = useCallback((e) => {
+    setPreviewTime(null);
+    if (!isDraggingSeek || !videoRef.current) return;
+    setIsDraggingSeek(false);
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    let targetTime = pos * duration;
+
     const maxTime = getMaxSeekTime();
     if (targetTime > maxTime) {
       targetTime = maxTime;
-      // trigger the challenge if seeking past it
       const blocker = challenges.find(ch => !completedChallenges.has(ch.id) && ch.timestamp_seconds === maxTime);
       if (blocker) {
         videoRef.current.currentTime = targetTime;
@@ -298,7 +458,19 @@ const Learn = () => {
       }
     }
     videoRef.current.currentTime = targetTime;
-  };
+    setCurrentTime(targetTime);
+    handleUserActivity();
+  }, [isDraggingSeek, duration, challenges, completedChallenges]); // eslint-disable-line
+
+  const handleSeekMouseLeave = useCallback(() => {
+    setPreviewTime(null);
+    if (isDraggingSeek) {
+      setIsDraggingSeek(false);
+      // Revert UI to the actual video position (avoids stale React state)
+      if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+      handleUserActivity();
+    }
+  }, [isDraggingSeek]); // eslint-disable-line
 
   const formatTime = (s) =>
     `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
@@ -447,14 +619,27 @@ const Learn = () => {
   const isDataScienceCourse = (lesson?.title || '').toLowerCase().includes('data science')
     || (lesson?.course_id === 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c'); // DS course ID
 
+  const MAX_CODE_SIZE = 50_000; // 50 KB limit
+  const EXECUTION_TIMEOUT_MS = 20_000; // 20s client-side timeout
+
   const executeCode = async (sourceCode, languageId) => {
-    const { data, error } = await supabase.functions.invoke('execute-code', {
+    if (sourceCode.length > MAX_CODE_SIZE) {
+      throw new Error(`Code exceeds ${MAX_CODE_SIZE / 1000}KB limit. Please reduce its size.`);
+    }
+
+    // Race the Supabase call against a client-side timeout
+    const invokePromise = supabase.functions.invoke('execute-code', {
       body: {
         code: sourceCode,
         language_id: languageId,
-        use_python_runner: isDataScienceCourse,
+        use_python_runner: isDataScienceCourse || languageId === 71,
       },
     });
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Execution timed out. Please try again.')), EXECUTION_TIMEOUT_MS)
+    );
+
+    const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
     if (error) throw new Error(error.message || 'Edge function error');
     return data; // { stdout, stderr, compile_output, status, status_id, time, memory }
   };
@@ -465,20 +650,22 @@ const Learn = () => {
     setCodeResult(null);
     try {
       const result = await executeCode(code, activeChallenge.language_id ?? 71);
-      const hasOutput = !!result.stdout?.trim();
-      const hasError = !!(result.stderr?.trim() || result.compile_output?.trim());
+      const hasCompileError = !!result.compile_output?.trim();
+      // For "Run Code", treat as passing if accepted by engine (status_id 3)
+      // stderr may contain Python warnings — don't treat those as failures
+      const passed = result.status_id === 3 && !hasCompileError;
       const errorText = (result.compile_output || result.stderr || '').trim();
 
       setCodeResult({
         type: 'test',
-        passed: !hasError && hasOutput,
+        passed,
         output: result.stdout?.trim() || '(No output)',
-        error: hasError ? errorText : null,
+        error: hasCompileError ? errorText : (result.stderr?.trim() || null),
         time: result.time,
         status: result.status,
       });
     } catch (err) {
-      toast.error('Execution failed: ' + err.message);
+      toast.error('Execution failed: ' + (err.message || 'Unknown error'));
     } finally {
       setSubmitting(false);
     }
@@ -487,6 +674,8 @@ const Learn = () => {
   const submitSolution = async () => {
     if (!activeChallenge || !code.trim()) return;
     if (completedChallenges.has(activeChallenge?.id)) return;
+    // Guard against double-submit (ref-based, not affected by async state delay)
+    if (completingRef.current) return;
 
     setSubmitting(true);
     setCodeResult(null);
@@ -494,12 +683,63 @@ const Learn = () => {
     setCodeAttemptCount(newAttempt);
 
     try {
-      const result = await executeCode(code, activeChallenge.language_id ?? 71);
+      // --- Hidden Evaluation Logic ---
+      let codeToRun = code;
 
-      // Judge0 status IDs: 3 = Accepted, others = various failures
-      const hasError = !!(result.stderr?.trim() || result.compile_output?.trim());
-      const passed = result.status_id === 3 && !hasError;
-      const errorText = (result.compile_output || result.stderr || '').trim();
+      // Inject tests for challenges that have hidden test code stored in the challenge
+      // (currently hardcoded for the DS Data Structures challenge; future: move to DB field)
+      if (activeChallenge.id === 'da6b7c8d-e9f0-4a25-8b25-dc6d7e8f9a0b') {
+        const testCode = `
+# --- HIDDEN TESTS ---
+try:
+    assert 'arr0' in locals(), "arr0 is not defined"
+    assert hasattr(arr0, 'ndim') and arr0.ndim == 0, "arr0 must be a 0D NumPy array"
+
+    assert 'arr1' in locals(), "arr1 is not defined"
+    assert hasattr(arr1, 'ndim') and arr1.ndim == 1, "arr1 must be a 1D NumPy array"
+
+    assert 'arr2' in locals(), "arr2 is not defined"
+    assert hasattr(arr2, 'ndim') and arr2.ndim == 2, "arr2 must be a 2D NumPy array"
+
+    assert 'arr3' in locals(), "arr3 is not defined"
+    assert hasattr(arr3, 'ndim') and arr3.ndim == 3, "arr3 must be a 3D NumPy array"
+
+    print("__TEST_RESULT__:PASS")
+except AssertionError as e:
+    print(f"__TEST_RESULT__:FAIL:{e}")
+    raise
+except Exception as e:
+    print(f"__TEST_RESULT__:FAIL:{e}")
+    raise
+`;
+        codeToRun = code + '\n' + testCode;
+      }
+
+      const result = await executeCode(codeToRun, activeChallenge.language_id ?? 71);
+
+      // Determine pass/fail:
+      // - Compile errors always fail
+      // - If tests were injected, check for structured marker in stdout
+      // - Otherwise accept if status_id === 3 (Accepted) — stderr may contain warnings
+      const hasCompileError = !!result.compile_output?.trim();
+      const stdoutText = result.stdout?.trim() || '';
+      const stderrText = result.stderr?.trim() || '';
+      const errorText = (result.compile_output || '').trim() || stderrText;
+
+      let passed;
+      let cleanOutput;
+      if (codeToRun !== code) {
+        // Injected tests: check for structured marker
+        const testPassed = stdoutText.includes('__TEST_RESULT__:PASS');
+        const testFailed = stdoutText.includes('__TEST_RESULT__:FAIL');
+        passed = testPassed && !testFailed && !hasCompileError;
+        // Remove the internal marker from user-visible output
+        cleanOutput = stdoutText.replace(/__TEST_RESULT__:[A-Z:]+/g, '').trim();
+      } else {
+        // No injected tests: status_id 3 = Accepted; allow stderr warnings
+        passed = result.status_id === 3 && !hasCompileError;
+        cleanOutput = stdoutText;
+      }
 
       if (passed) {
         const marks = getMarksPreview();
@@ -508,7 +748,7 @@ const Learn = () => {
           type: 'submission',
           passed: true,
           marks_earned: marks,
-          output: result.stdout?.trim(),
+          output: cleanOutput,
           time: result.time,
           status: result.status,
         });
@@ -519,14 +759,14 @@ const Learn = () => {
           type: 'submission',
           passed: false,
           error: errorText || `Runtime error: ${result.status}`,
-          output: result.stdout?.trim() || null,
+          output: cleanOutput || null,
           time: result.time,
           status: result.status,
         });
         if (newAttempt >= 2) setShowHintOption(true);
       }
     } catch (err) {
-      toast.error('Submission failed: ' + err.message);
+      toast.error('Submission failed: ' + (err.message || 'Unknown error'));
     } finally {
       setSubmitting(false);
     }
@@ -575,13 +815,21 @@ const Learn = () => {
 
           {/* Video Player */}
           <div className="flex-1 flex flex-col">
-            <div ref={videoContainerRef} className={`relative bg-black flex flex-col justify-center ${isFullscreen ? 'h-screen w-screen fixed inset-0 z-50' : 'aspect-video'}`}>
+            <div
+              ref={videoContainerRef}
+              className={`relative bg-black flex flex-col justify-center overflow-hidden ${isFullscreen ? 'h-screen w-screen fixed inset-0 z-50' : 'aspect-video'}`}
+              onMouseMove={handleUserActivity}
+              onKeyDown={handleUserActivity}
+              tabIndex="0"
+            >
               {lesson.video_url || lesson.order_index ? (
                 <video
                   ref={videoRef}
-                  src={videoUrl}
-                  preload="metadata"
+                  /* src is set by useHlsPlayer hook (HLS or MP4) — do NOT set src here */
+                  preload="auto"
                   playsInline
+                  controlsList="nodownload"
+                  onContextMenu={(e) => e.preventDefault()}
                   className={`${isFullscreen ? 'h-[calc(100vh-80px)]' : 'h-full'} w-full object-contain cursor-pointer`}
                   onLoadedMetadata={handleLoadedMetadata}
                   onTimeUpdate={handleTimeUpdate}
@@ -595,7 +843,12 @@ const Learn = () => {
                   }}
                   onWaiting={() => {
                     clearTimeout(bufferingTimerRef.current);
-                    bufferingTimerRef.current = setTimeout(() => setIsBuffering(true), 1500);
+                    bufferingTimerRef.current = setTimeout(() => setIsBuffering(true), 2500);
+                  }}
+                  onStalled={() => {
+                    // Network stalled — show buffering spinner persistently
+                    clearTimeout(bufferingTimerRef.current);
+                    bufferingTimerRef.current = setTimeout(() => setIsBuffering(true), 2500);
                   }}
                   onPlaying={() => {
                     clearTimeout(bufferingTimerRef.current);
@@ -606,12 +859,12 @@ const Learn = () => {
                     clearTimeout(bufferingTimerRef.current);
                     setIsBuffering(false);
                   }}
+                  onProgress={handleBufferProgress}
                   onError={() => {
                     clearTimeout(bufferingTimerRef.current);
                     setIsBuffering(false);
                     setVideoError(true);
                   }}
-                  onClick={togglePlay}
                   data-testid="video-player"
                 />
               ) : (
@@ -653,46 +906,169 @@ const Learn = () => {
                 </div>
               )}
 
-              {/* Video Controls overlay when fullscreen or relative when inline */}
-              <div className={`${isFullscreen ? 'absolute bottom-0 left-0 right-0 h-[80px] bg-black/80 backdrop-blur-md px-6' : 'bg-surface-highlight p-4 relative'}`}>
-                <div className="absolute top-0 left-0 right-0 h-1 bg-surface cursor-pointer z-0 transform -translate-y-1/2" onClick={handleSeek} data-testid="video-progress">
-                  <div className="h-full bg-primary transition-all relative" style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}>
+              {/* Mobile Double Tap Zones */}
+              {lesson.video_url || lesson.order_index ? (
+                <>
+                  <div className="absolute inset-y-0 left-0 w-[40%] z-10 cursor-pointer" onClick={handleDoubleTapLeft} />
+                  <div className="absolute inset-y-0 right-0 w-[40%] z-10 cursor-pointer" onClick={handleDoubleTapRight} />
+                  <div className="absolute inset-0 left-[40%] right-[40%] z-10 cursor-pointer" onClick={() => { handleUserActivity(); togglePlay(); }} />
+
+                  {/* Double tap indicators */}
+                  {mobileDoubleTapIndicator === 'left' && (
+                    <div className="absolute left-10 sm:left-20 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center animate-pulse bg-black/50 rounded-full p-4 sm:p-6 backdrop-blur-sm pointer-events-none">
+                      <div className="flex gap-1 mb-1">
+                        <ChevronRight className="w-5 h-5 text-white rotate-180 -mr-3 animate-[pulse_1s_ease-in-out_infinite]" />
+                        <ChevronRight className="w-5 h-5 text-white rotate-180 -mr-3 animate-[pulse_1s_ease-in-out_infinite_100ms]" />
+                        <ChevronRight className="w-5 h-5 text-white rotate-180 animate-[pulse_1s_ease-in-out_infinite_200ms]" />
+                      </div>
+                      <span className="text-white font-bold text-sm sm:text-base">-10s</span>
+                    </div>
+                  )}
+                  {mobileDoubleTapIndicator === 'right' && (
+                    <div className="absolute right-10 sm:right-20 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center justify-center animate-pulse bg-black/50 rounded-full p-4 sm:p-6 backdrop-blur-sm pointer-events-none">
+                      <div className="flex gap-1 mb-1">
+                        <ChevronRight className="w-5 h-5 text-white -mr-3 animate-[pulse_1s_ease-in-out_infinite]" />
+                        <ChevronRight className="w-5 h-5 text-white -mr-3 animate-[pulse_1s_ease-in-out_infinite_100ms]" />
+                        <ChevronRight className="w-5 h-5 text-white animate-[pulse_1s_ease-in-out_infinite_200ms]" />
+                      </div>
+                      <span className="text-white font-bold text-sm sm:text-base">+10s</span>
+                    </div>
+                  )}
+                </>
+              ) : null}
+
+              {/* Video Controls overlay */}
+              <div
+                className={`transition-opacity duration-300 z-20 ${showControls || !isPlaying || isDraggingSeek || showSpeedMenu ? 'opacity-100' : 'opacity-0'} ${isFullscreen ? 'absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent px-6 pb-6 pt-16' : 'absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 pt-12'}`}
+                onMouseEnter={handleUserActivity}
+                onMouseLeave={() => { if (isPlaying) setShowControls(false); }}
+              >
+                {/* Seek Bar */}
+                <div
+                  className="relative h-1.5 sm:h-2 bg-white/20 rounded-full cursor-pointer mb-3 group"
+                  onPointerDown={handleSeekPointerDown}
+                  onPointerMove={handleSeekPointerMove}
+                  onPointerUp={handleSeekPointerUp}
+                  onMouseLeave={handleSeekMouseLeave}
+                  data-testid="video-progress"
+                >
+                  {/* Buffered Progress */}
+                  {bufferedRanges.map((range, idx) => (
+                    <div
+                      key={idx}
+                      className="absolute top-0 h-full bg-white/30 rounded-full pointer-events-none"
+                      style={{
+                        left: `${(range.start / (duration || 1)) * 100}%`,
+                        width: `${((range.end - range.start) / (duration || 1)) * 100}%`
+                      }}
+                    />
+                  ))}
+
+                  {/* Active Progress */}
+                  <div
+                    className="absolute top-0 left-0 h-full bg-primary rounded-full pointer-events-none"
+                    style={{ width: `${(Math.min(getMaxSeekTime() || duration, isDraggingSeek && previewTime !== null ? previewTime : currentTime) / (duration || 1)) * 100}%` }}
+                  >
                     {/* Playhead */}
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-3 h-3 bg-white rounded-full shadow-md" />
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-primary rounded-full shadow-[0_0_10px_rgba(37,99,235,0.8)] opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
-                  {/* Challenge markers on timeline */}
+
+                  {/* Challenge markers */}
                   {challenges.map((ch) => (
                     <div
                       key={ch.id}
-                      className="absolute top-1/2 w-3 h-3 -translate-x-1/2 -translate-y-1/2 z-10"
+                      className="absolute top-1/2 w-3 h-3 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
                       style={{ left: `${(ch.timestamp_seconds / (duration || 1)) * 100}%` }}
                     >
-                      <div className={`w-3 h-3 rotate-45 shadow-[0_0_10px_rgba(37,99,235,0.2)] ${completedChallenges.has(ch.id) ? 'bg-accent' : 'bg-primary'}`}
+                      <div className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rotate-45 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${completedChallenges.has(ch.id) ? 'bg-accent' : 'bg-primary'}`}
                         title={ch.title} />
                     </div>
                   ))}
+
+                  {/* Hover tooltip */}
+                  {previewTime !== null && (
+                    <div
+                      className="absolute bottom-full mb-2 -translate-x-1/2 px-2 py-1 bg-black/90 text-white font-mono text-xs rounded border border-white/20 whitespace-nowrap pointer-events-none shadow-lg"
+                      style={{ left: `${(previewTime / (duration || 1)) * 100}%` }}
+                    >
+                      {formatTime(previewTime)}
+                    </div>
+                  )}
                 </div>
-                <div className={`flex items-center justify-between ${isFullscreen ? 'h-full' : 'mt-2'}`}>
-                  <div className="flex items-center gap-2 sm:gap-4">
-                    <button onClick={togglePlay} className="p-1.5 sm:p-2 hover:bg-white/10 rounded-md transition-colors" data-testid="play-pause-btn">
-                      {isPlaying ? <Pause className="w-4 h-4 sm:w-5 sm:h-5 text-white" /> : <Play className="w-4 h-4 sm:w-5 sm:h-5 text-white" />}
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1 sm:gap-3">
+                    <button onClick={togglePlay} className="p-2 hover:bg-white/20 rounded-full transition-colors text-white" data-testid="play-pause-btn">
+                      {isPlaying ? <Pause className="w-5 h-5 sm:w-6 sm:h-6 fill-white" /> : <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-white ml-0.5" />}
                     </button>
-                    <button onClick={toggleMute} className="p-1.5 sm:p-2 hover:bg-white/10 rounded-md transition-colors">
-                      {isMuted ? <VolumeX className="w-4 h-4 sm:w-5 sm:h-5 text-white" /> : <Volume2 className="w-4 h-4 sm:w-5 sm:h-5 text-white" />}
+
+                    <button onClick={() => skipVideo(-10)} className="hidden sm:block p-2 hover:bg-white/20 rounded-full transition-colors text-white" title="Rewind 10s">
+                      <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
                     </button>
-                    <span className="text-xs sm:text-sm text-text-secondary font-mono">
-                      {formatTime(currentTime)} / {formatTime(duration)}
+                    <button onClick={() => skipVideo(10)} className="hidden sm:block p-2 hover:bg-white/20 rounded-full transition-colors text-white" title="Forward 10s">
+                      <RotateCw className="w-4 h-4 sm:w-5 sm:h-5" />
+                    </button>
+
+                    <div className="flex items-center gap-1 ml-1 group relative">
+                      <button onClick={toggleMute} className="p-2 hover:bg-white/20 rounded-full transition-colors text-white">
+                        {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" /> : <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />}
+                      </button>
+                      <div className="w-0 overflow-hidden group-hover:w-20 transition-all duration-300 ease-in-out opacity-0 group-hover:opacity-100 flex items-center">
+                        <input
+                          type="range"
+                          min="0" max="1" step="0.05"
+                          value={isMuted ? 0 : volume}
+                          onChange={(e) => handleVolumeChange([parseFloat(e.target.value)])}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className="w-16 h-1 bg-white/30 rounded-lg appearance-none cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    <span className="text-xs sm:text-sm text-white/90 font-mono ml-2 font-medium">
+                      {formatTime(currentTime)} <span className="text-white/50 mx-1">/</span> {formatTime(duration)}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 sm:gap-4">
-                    <div className="flex items-center gap-1 sm:gap-2">
+
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    <div className="flex items-center gap-1.5 sm:gap-2 mr-1 sm:mr-2 bg-white/10 px-2.5 py-1 rounded-lg border border-white/10">
                       <Target className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" />
                       <span className="text-xs sm:text-sm font-semibold text-white">{sessionPoints}</span>
-                      <span className="hidden sm:inline text-xs text-text-secondary">points</span>
+                      <span className="hidden sm:inline text-xs text-white/70">pts</span>
                     </div>
-                    <div className="hidden sm:block w-px h-6 bg-border mx-1" />
-                    <button onClick={toggleFullscreen} className="p-1.5 sm:p-2 hover:bg-white/10 rounded-md transition-colors">
-                      {isFullscreen ? <Minimize className="w-4 h-4 sm:w-5 sm:h-5 text-white" /> : <Maximize className="w-4 h-4 sm:w-5 sm:h-5 text-white" />}
+
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                        className="p-2 hover:bg-white/20 rounded-lg transition-colors text-white flex items-center gap-1"
+                        title="Playback Speed"
+                      >
+                        <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <span className="hidden sm:inline text-xs font-semibold">{playbackRate}x</span>
+                      </button>
+                      {showSpeedMenu && (
+                        <div className="absolute bottom-full mb-3 right-0 bg-[#161b22]/95 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden shadow-2xl z-50 flex flex-col w-32 py-1">
+                          {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(speed => (
+                            <button
+                              key={speed}
+                              onClick={() => handleSpeedChange(speed)}
+                              className={`px-4 py-2 text-sm text-left hover:bg-white/10 transition-colors ${playbackRate === speed ? 'text-primary font-bold bg-primary/10' : 'text-white/80'}`}
+                            >
+                              {speed === 1 ? 'Normal' : `${speed}x`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {document.pictureInPictureEnabled && (
+                      <button onClick={togglePiP} className="hidden sm:block p-2 hover:bg-white/20 rounded-lg transition-colors text-white">
+                        <PictureInPicture className="w-4 h-4 sm:w-5 sm:h-5" />
+                      </button>
+                    )}
+
+                    <button onClick={toggleFullscreen} className="p-2 hover:bg-white/20 rounded-lg transition-colors text-white">
+                      {isFullscreen ? <Minimize className="w-4 h-4 sm:w-5 sm:h-5" /> : <Maximize className="w-4 h-4 sm:w-5 sm:h-5" />}
                     </button>
                   </div>
                 </div>
@@ -974,7 +1350,7 @@ const Learn = () => {
                               <div className="flex items-center justify-between p-4 bg-warning/10 border border-warning/30 rounded-xl">
                                 <div className="flex items-center gap-2">
                                   <AlertTriangle className="w-4 h-4 text-warning" />
-                                  <span className="text-sm text-warning">Struggling? Get a hint (reduces to 1 point)</span>
+                                  <span className="text-sm text-warning">Struggling? Get a hint (reduces to 2 points)</span>
                                 </div>
                                 <Button size="sm" variant="outline" onClick={requestHint}
                                   className="border-warning text-warning hover:bg-warning/10" data-testid="request-hint-btn">
@@ -1105,37 +1481,42 @@ const Learn = () => {
 
                         {/* Editor Content */}
                         <div className="flex-1 relative">
-                          <Editor
-                            height="100%"
-                            language={LANGUAGE_MAP[activeChallenge?.language_id]?.monaco || 'python'}
-                            theme="vs-dark"
-                            value={code}
-                            onChange={(v) => setCode(v || '')}
-                            options={{
-                              minimap: { enabled: false },
-                              fontSize: isMobile ? 13 : 15,
-                              fontFamily: 'JetBrains Mono, monospace',
-                              padding: { top: 12 },
-                              scrollBeyondLastLine: false,
-                              lineHeight: isMobile ? 20 : 24,
-                              renderLineHighlight: 'all',
-                              wordWrap: isMobile ? 'on' : 'off',
-                            }}
-                            onMount={(editor) => {
-                              // Intercept keyboard shortcuts
-                              editor.onKeyDown((e) => {
-                                // Block Copy (C=33), Paste (V=52), and Cut (X=54) for non-special users
-                                if ((e.ctrlKey || e.metaKey) && (e.keyCode === 33 || e.keyCode === 52 || e.keyCode === 54)) {
-                                  if (!hasSpecialAccess) {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    toast.error('Copy & Paste is disabled for challenges!');
+                          <Suspense fallback={
+                            <div className="flex items-center justify-center h-full bg-[#1e1e1e] text-text-secondary text-sm">
+                              Loading editor...
+                            </div>
+                          }>
+                            <Editor
+                              height="100%"
+                              language={LANGUAGE_MAP[activeChallenge?.language_id]?.monaco || 'python'}
+                              theme="vs-dark"
+                              value={code}
+                              onChange={(v) => setCode(v || '')}
+                              options={{
+                                minimap: { enabled: false },
+                                fontSize: isMobile ? 13 : 15,
+                                fontFamily: 'JetBrains Mono, monospace',
+                                padding: { top: 12 },
+                                scrollBeyondLastLine: false,
+                                lineHeight: isMobile ? 20 : 24,
+                                renderLineHighlight: 'all',
+                                wordWrap: isMobile ? 'on' : 'off',
+                              }}
+                              onMount={(editor) => {
+                                editor.onKeyDown((e) => {
+                                  // Block Copy (C=33), Paste (V=52), and Cut (X=54) for non-special users
+                                  if ((e.ctrlKey || e.metaKey) && (e.keyCode === 33 || e.keyCode === 52 || e.keyCode === 54)) {
+                                    if (!hasSpecialAccess) {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      toast.error('Copy & Paste is disabled for challenges!');
+                                    }
                                   }
-                                }
-                              });
-                            }}
-                            data-testid="code-editor"
-                          />
+                                });
+                              }}
+                              data-testid="code-editor"
+                            />
+                          </Suspense>
                         </div>
                       </div>
                     </Panel>
@@ -1163,7 +1544,7 @@ const Learn = () => {
 
             <div className="flex items-center gap-2 bg-primary/10 border border-primary/20 px-6 py-3 rounded-full">
               <Target className="w-5 h-5 text-primary" />
-              <span className="text-xl font-bold text-foreground">{sessionPoints * 2}</span>
+              <span className="text-xl font-bold text-foreground">{sessionPoints}</span>
               <span className="text-sm text-text-secondary">points earned</span>
             </div>
 
