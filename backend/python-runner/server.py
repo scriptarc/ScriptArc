@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import subprocess
@@ -6,6 +6,7 @@ import sys
 import tempfile
 import os
 import time
+import secrets
 
 app = FastAPI(title="ScriptArc Python Runner", version="1.0.0")
 
@@ -26,8 +27,17 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
-TIMEOUT_SECONDS = 10  # max execution time per request
+TIMEOUT_SECONDS = 10   # max execution time per request
 MAX_OUTPUT_BYTES = 50_000  # cap output to ~50 KB
+MAX_CODE_BYTES   = 10_000  # reject code payloads over 10 KB
+MAX_STDIN_BYTES  = 5_000   # reject stdin payloads over 5 KB
+
+# Shared secret: the Edge Function must send X-Runner-Secret matching this value.
+# Must be set in production — the server will refuse to start without it.
+_RUNNER_SECRET = os.environ.get("RUNNER_SECRET", "")
+_IS_PRODUCTION = os.environ.get("ENVIRONMENT", "development").lower() == "production"
+if _IS_PRODUCTION and not _RUNNER_SECRET:
+    raise RuntimeError("RUNNER_SECRET must be set in production. Refusing to start.")
 
 
 class ExecuteRequest(BaseModel):
@@ -54,7 +64,21 @@ def health_check():
 
 
 @app.post("/execute", response_model=ExecuteResponse)
-def execute_code(req: ExecuteRequest):
+def execute_code(req: ExecuteRequest, request: Request):
+    # ── Shared-secret authentication ──────────────────────────
+    # Reject requests that don't carry the correct X-Runner-Secret header.
+    # Enforced when RUNNER_SECRET env var is set (always true in production).
+    if _RUNNER_SECRET:
+        provided = request.headers.get("x-runner-secret", "")
+        if not secrets.compare_digest(provided, _RUNNER_SECRET):
+            raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    # ── Input size limits ─────────────────────────────────────
+    if len(req.code.encode()) > MAX_CODE_BYTES:
+        raise HTTPException(status_code=400, detail=f"Code exceeds {MAX_CODE_BYTES // 1000} KB limit.")
+    if len((req.stdin or "").encode()) > MAX_STDIN_BYTES:
+        raise HTTPException(status_code=400, detail=f"Stdin exceeds {MAX_STDIN_BYTES // 1000} KB limit.")
+
     if not req.code.strip():
         raise HTTPException(status_code=400, detail="Code cannot be empty.")
 
@@ -88,6 +112,20 @@ def execute_code(req: ExecuteRequest):
             # This avoids using preexec_fn, which can cause deadlocks in multi-threaded environments like FastAPI workers.
             cmd = f"ulimit -v 524288 && {sys.executable} script.py"
             
+            # Pass ONLY the minimal env vars needed for safe execution.
+            # Never pass os.environ — it would expose host secrets (RUNNER_SECRET,
+            # database credentials, etc.) to untrusted user code via os.environ reads.
+            safe_env = {
+                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "HOME": tmpdir,               # isolate from real home dir
+                "MPLBACKEND": "Agg",          # prevent matplotlib GUI popups
+                "OPENBLAS_NUM_THREADS": "1",
+                "OMP_NUM_THREADS": "1",
+                "MKL_NUM_THREADS": "1",
+                "NUMBA_DISABLE_JIT": "1",     # faster cold start in sandbox
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+
             process = subprocess.Popen(
                 ["sh", "-c", cmd],
                 stdout=subprocess.PIPE,
@@ -95,13 +133,7 @@ def execute_code(req: ExecuteRequest):
                 text=True,
                 cwd=tmpdir,
                 stdin=subprocess.PIPE,
-                env={
-                    **os.environ,
-                    "MPLBACKEND": "Agg",  # prevent matplotlib GUI popups
-                    "OPENBLAS_NUM_THREADS": "1",
-                    "OMP_NUM_THREADS": "1",
-                    "MKL_NUM_THREADS": "1",
-                },
+                env=safe_env,
             )
             
             stdout, stderr = process.communicate(input=req.stdin or None, timeout=TIMEOUT_SECONDS)
@@ -118,6 +150,8 @@ def execute_code(req: ExecuteRequest):
             )
 
         except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()  # drain pipes to avoid deadlock
             elapsed = round(time.monotonic() - start, 3)
             return ExecuteResponse(
                 stdout="",

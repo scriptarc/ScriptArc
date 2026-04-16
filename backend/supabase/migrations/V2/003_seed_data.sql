@@ -1,4 +1,4 @@
--- ============================================================
+﻿-- ============================================================
 -- ScriptArc — Supabase PostgreSQL Schema (V2)
 -- Migration 003: Seed Data (Data Science Course)
 -- Seeds the Data Science course, lessons, and challenges.
@@ -58,83 +58,83 @@ VALUES
   ('f2a6b7c8-d9e0-4f06-9a0b-c2d3e4f5a6b7', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 6,
    'Array Attributes Demonstration',
    'Unit 1: Hands-on demonstration of NumPy array attributes and methods.',
-   'videos/Course/Data Science/Unit1/lecture6.mp4', 7),
+   'videos/Course/Data Science/Unit1/lecture6.mp4', 2),
 
   ('a3b7c8d9-e0f1-4a07-8b1c-d3e4f5a6b7c8', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 7,
    'Basic Array Operations',
    'Unit 1: Perform arithmetic, broadcasting, and element-wise operations on arrays.',
-   'videos/Course/Data Science/Unit1/lecture7.mp4', 7),
+   'videos/Course/Data Science/Unit1/lecture7.mp4', 10),
 
   ('b4c8d9e0-f1a2-4b08-9c2d-e4f5a6b7c8d9', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 8,
    'Joining, Splitting, Searching, and Sorting Arrays',
    'Unit 1: Combine, split, search, and sort NumPy arrays.',
-   'videos/Course/Data Science/Unit1/lecture8.mp4', 7),
+   'videos/Course/Data Science/Unit1/lecture8.mp4', 12),
 
   ('c5d9e0f1-a2b3-4c09-8d3e-f5a6b7c8d9e0', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 9,
    'Array Indexing, Slicing, and Iterating',
    'Unit 1: Access, slice, and iterate through array elements efficiently.',
-   'videos/Course/Data Science/Unit1/lecture9.mp4', 7),
+   'videos/Course/Data Science/Unit1/lecture9.mp4', 13),
 
   ('d6e0f1a2-b3c4-4d10-9e4f-a6b7c8d9e0f1', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 10,
    'Copying Arrays, Shape Manipulation, and Identity Functions',
    'Unit 1: Deep copies, reshaping, and identity/eye functions.',
-   'videos/Course/Data Science/Unit1/lecture10.mp4', 7),
+   'videos/Course/Data Science/Unit1/lecture10.mp4', 3),
 
   ('e7f1a2b3-c4d5-4e11-8f5a-b7c8d9e0f1a2', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 11,
    'Exploring Data using Series and Data Frames',
    'Unit 1: Introduction to Pandas Series and DataFrames for data exploration.',
-   'videos/Course/Data Science/Unit1/lecture11.mp4', 7),
+   'videos/Course/Data Science/Unit1/lecture11.mp4', 16),
 
   -- ── Unit 2 (10 Lectures) ──
   ('f8a2b3c4-d5e6-4f12-9a6b-c8d9e0f1a2b3', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 12,
    'Handling Large Volumes of Data',
    'Unit 2: Techniques and strategies for working with large datasets.',
-   'videos/Course/Data Science/Unit2/lecture1.mp4', 7),
+   'videos/Course/Data Science/Unit2/lecture1.mp4', 6),
 
   ('a9b3c4d5-e6f7-4a13-8b7c-d9e0f1a2b3c4', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 13,
    'General Techniques for Handling Large Volumes of Data',
    'Unit 2: Sampling, chunking, and memory-efficient data processing.',
-   'videos/Course/Data Science/Unit2/lecture2.mp4', 7),
+   'videos/Course/Data Science/Unit2/lecture2.mp4', 9),
 
   ('b0c4d5e6-f7a8-4b14-9c8d-e0f1a2b3c4d5', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 14,
    'General Tips for Handling Large Amounts of Data',
    'Unit 2: Practical tips for optimizing data pipelines.',
-   'videos/Course/Data Science/Unit2/lecture3.mp4', 7),
+   'videos/Course/Data Science/Unit2/lecture3.mp4', 3),
 
   ('c1d5e6f7-a8b9-4c15-8d9e-f1a2b3c4d5e6', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 15,
    'Data Wrangling',
    'Unit 2: Reshaping, transforming, and preparing messy data for analysis.',
-   'videos/Course/Data Science/Unit2/lecture4.mp4', 7),
+   'videos/Course/Data Science/Unit2/lecture4.mp4', 10),
 
   ('d2e6f7a8-b9c0-4d16-9eaf-a2b3c4d5e6f7', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 16,
    'Combining and Merging Data Sets',
    'Unit 2: Joining, merging, and concatenating datasets in Pandas.',
-   'videos/Course/Data Science/Unit2/lecture5.mp4', 7),
+   'videos/Course/Data Science/Unit2/lecture5.mp4', 17),
 
   ('e3f7a8b9-c0d1-4e17-8fba-b3c4d5e6f7a8', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 17,
    'Reshaping and Pivoting',
    'Unit 2: Pivot tables, melt, stack, and unstack operations.',
-   'videos/Course/Data Science/Unit2/lecture6.mp4', 7),
+   'videos/Course/Data Science/Unit2/lecture6.mp4', 12),
 
   ('f4a8b9c0-d1e2-4f18-9acb-c4d5e6f7a8b9', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 18,
    'Handling Missing Values',
    'Unit 2: Detecting, filling, and dropping missing data.',
-   'videos/Course/Data Science/Unit2/lecture7.mp4', 7),
+   'videos/Course/Data Science/Unit2/lecture7.mp4', 10),
 
   ('a5b9c0d1-e2f3-4a19-8bdc-d5e6f7a8b9c0', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 19,
    'Data Cleaning and Preparation',
    'Unit 2: End-to-end data cleaning workflows.',
-   'videos/Course/Data Science/Unit2/lecture8.mp4', 7),
+   'videos/Course/Data Science/Unit2/lecture8.mp4', 11),
 
   ('b6c0d1e2-f3a4-4b20-9ced-e6f7a8b9c0d1', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 20,
    'Data Transformation',
    'Unit 2: Applying functions, mapping, replacing, and binning data.',
-   'videos/Course/Data Science/Unit2/lecture9.mp4', 7),
+   'videos/Course/Data Science/Unit2/lecture9.mp4', 13),
 
   ('c7d1e2f3-a4b5-4c21-8dfe-f7a8b9c0d1e2', 'd5c1e7a3-9f2b-4e8d-a6c4-3b7f1e9d2a5c', 21,
    'String Manipulations',
    'Unit 2: Vectorized string operations in Pandas.',
-   'videos/Course/Data Science/Unit2/lecture10.mp4', 7);
+   'videos/Course/Data Science/Unit2/lecture10.mp4', 9);
 
 
 -- ============================================================

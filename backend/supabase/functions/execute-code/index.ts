@@ -4,11 +4,14 @@
 //   2. Judge0 CE  (general coding challenges)
 //
 // Deploy with: npx supabase functions deploy execute-code --no-verify-jwt
+// JWT verification is performed manually inside the handler (see auth check below).
 
 // @ts-nocheck
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const JUDGE0_URL = 'https://ce.judge0.com/submissions';
 const PYTHON_RUNNER_URL = Deno.env.get('PYTHON_RUNNER_URL') ?? '';
+const RUNNER_SECRET = Deno.env.get('RUNNER_SECRET') ?? '';
 
 // Restrict CORS to known origins. Add production domain to ALLOWED_ORIGINS env var.
 const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? 'http://localhost:3000').split(',').map(o => o.trim());
@@ -29,9 +32,12 @@ function getCorsHeaders(origin: string) {
 async function executePythonRunner(code: string, stdin: string) {
     if (!PYTHON_RUNNER_URL) throw new Error('PYTHON_RUNNER_URL not configured');
 
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (RUNNER_SECRET) headers['X-Runner-Secret'] = RUNNER_SECRET;
+
     const res = await fetch(`${PYTHON_RUNNER_URL}/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ code, stdin }),
     });
 
@@ -100,6 +106,31 @@ Deno.serve(async (req) => {
 
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
+    }
+
+    // ── Auth: verify the caller holds a valid Supabase session ──
+    // The function is deployed with --no-verify-jwt so we do this manually.
+    // supabase.functions.invoke() from the client automatically includes the JWT.
+    const authHeader = req.headers.get('authorization') ?? '';
+    const jwt = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!jwt) {
+        return new Response(
+            JSON.stringify({ error: 'Authentication required.' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+    }
+    // Validate the JWT against Supabase Auth — rejects expired/forged tokens.
+    const supabaseClient = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        { auth: { persistSession: false } }
+    );
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(jwt);
+    if (authError || !user) {
+        return new Response(
+            JSON.stringify({ error: 'Invalid or expired session.' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
     }
 
     try {
